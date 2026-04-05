@@ -1,0 +1,6 @@
+openenv-core>=0.2.3
+fastapi>=0.104.0
+uvicorn>=0.24.0
+fastmcp
+pydantic>=2.0
+openai

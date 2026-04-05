@@ -1,0 +1,529 @@
+"""DevOps Triage Environment — MCPEnvironment subclass with all 3 tasks."""
+
+from __future__ import annotations
+
+import json
+import random
+from typing import Any, Optional
+from uuid import uuid4
+
+try:
+    from openenv.core.env_server.mcp_environment import MCPEnvironment
+    from openenv.core.env_server.types import Action, Observation, State
+except ImportError:
+    from openenv.core.env_server.mcp_environment import MCPEnvironment
+    from openenv.core.env_server.interfaces import Action, Observation, State
+
+from fastmcp import FastMCP
+
+from .data.task1_log_diagnosis import SCENARIOS as TASK1_SCENARIOS
+from .data.task2_test_triage import SCENARIOS as TASK2_SCENARIOS
+from .data.task3_outage_rca import SCENARIOS as TASK3_SCENARIOS, SERVICE_TOPOLOGY
+from .rewards import grade_log_diagnosis, grade_test_triage, grade_outage_rca
+
+
+class DevOpsState(State):
+    """Pydantic state for the DevOps Triage environment."""
+    task: str = ""
+    scenario_id: str = ""
+    accumulated_reward: float = 0.0
+
+
+TASK_NAMES = {"log_diagnosis", "test_triage", "outage_rca"}
+
+
+class DevOpsEnvironment(MCPEnvironment):
+    """DevOps Triage environment with 3 tasks of increasing difficulty."""
+
+    def __init__(self) -> None:
+        mcp = FastMCP("devops_triage")
+        self._register_tools(mcp)
+        super().__init__(mcp)
+
+        self._state = DevOpsState(episode_id=str(uuid4()), step_count=0)
+        self._current_task: str = ""
+        self._scenario: dict = {}
+        self._done = False
+        self._accumulated_reward = 0.0
+
+        # Tracking for incremental rewards
+        self._queried_services: set[str] = set()
+        self._search_terms_used: set[str] = set()
+        self._tests_inspected: set[str] = set()
+        self._tests_history_checked: set[str] = set()
+        self._source_files_viewed: set[str] = set()
+        self._rca_services_checked: set[str] = set()
+        self._rca_metrics_checked: set[str] = set()
+        self._rca_traces_viewed: set[str] = set()
+        self._rca_logs_viewed: set[str] = set()
+        self._action_history: list[str] = []
+
+        # Task 2 accumulates classifications
+        self._test_classifications: dict[str, dict] = {}
+        self._final_score: float = 0.0
+
+    # ── Tool Registration ──
+
+    def _register_tools(self, mcp: FastMCP) -> None:
+        env = self
+
+        # ── Task 1 Tools ──
+        @mcp.tool
+        def get_services() -> list[str]:
+            """List all available services in the cluster."""
+            return list(env._scenario.get("services", {}).keys())
+
+        @mcp.tool
+        def get_logs(service: str, level: str = "ALL", limit: int = 20) -> list[dict]:
+            """Get log entries from a service. Filter by level (ERROR/WARN/INFO/ALL). Returns up to `limit` entries."""
+            services = env._scenario.get("services", {})
+            if service not in services:
+                return [{"error": f"Service '{service}' not found. Use get_services() to list available services."}]
+            logs = services[service]
+            if level != "ALL":
+                logs = [e for e in logs if e["level"] == level.upper()]
+            return logs[:limit]
+
+        @mcp.tool
+        def search_logs(keyword: str) -> list[dict]:
+            """Search across all service logs for entries containing the keyword. Returns up to 30 matches."""
+            results = []
+            for service_name, logs in env._scenario.get("services", {}).items():
+                for entry in logs:
+                    if keyword.lower() in entry["message"].lower():
+                        results.append({**entry, "service": service_name})
+            return results[:30]
+
+        @mcp.tool
+        def submit_diagnosis(incident_type: str, severity: str, affected_services: str, root_cause: str) -> dict:
+            """Submit your incident diagnosis.
+            - incident_type: the type of incident (e.g. 'memory_leak', 'database_connection_pool_exhaustion')
+            - severity: P1/P2/P3/P4
+            - affected_services: comma-separated service names
+            - root_cause: free-text description of the root cause
+            """
+            if env._current_task != "log_diagnosis":
+                return {"error": "submit_diagnosis is only available for the log_diagnosis task"}
+            submitted = {
+                "incident_type": incident_type,
+                "severity": severity,
+                "affected_services": affected_services,
+                "root_cause": root_cause,
+            }
+            score = grade_log_diagnosis(submitted, env._scenario["ground_truth"])
+            env._final_score = score
+            env._done = True
+            return {"submitted": True, "score": score, "done": True}
+
+        # ── Task 2 Tools ──
+        @mcp.tool
+        def get_test_summary() -> dict:
+            """Get overview of the test suite results: total, passed, failed, skipped counts and list of failed test IDs."""
+            summary = env._scenario.get("test_summary", {})
+            failed_ids = [t["test_id"] for t in env._scenario.get("failed_tests", [])]
+            return {**summary, "failed_test_ids": failed_ids}
+
+        @mcp.tool
+        def get_test_details(test_id: str) -> dict:
+            """Get detailed output for a specific test: error message, stack trace, console logs, DOM snapshot."""
+            for t in env._scenario.get("failed_tests", []):
+                if t["test_id"] == test_id:
+                    return {
+                        "test_id": t["test_id"],
+                        "name": t["name"],
+                        "error_output": t["error_output"],
+                        "stack_trace": t["stack_trace"],
+                        "console_logs": t["console_logs"],
+                        "dom_snapshot": t["dom_snapshot"],
+                    }
+            return {"error": f"Test '{test_id}' not found. Use get_test_summary() to list failed tests."}
+
+        @mcp.tool
+        def get_test_history(test_id: str, num_runs: int = 10) -> dict:
+            """Get pass/fail history for a test across recent CI runs. True=pass, False=fail."""
+            for t in env._scenario.get("failed_tests", []):
+                if t["test_id"] == test_id:
+                    history = t["history"][:num_runs]
+                    pass_rate = sum(history) / len(history) if history else 0
+                    return {
+                        "test_id": test_id,
+                        "history": history,
+                        "pass_rate": round(pass_rate, 2),
+                        "total_runs": len(history),
+                    }
+            return {"error": f"Test '{test_id}' not found."}
+
+        @mcp.tool
+        def get_source_code(file_path: str) -> str:
+            """View application or test source code by file path."""
+            files = env._scenario.get("source_files", {})
+            if file_path in files:
+                return files[file_path]
+            available = list(files.keys())
+            return f"File '{file_path}' not found. Available files: {available}"
+
+        @mcp.tool
+        def get_recent_changes() -> list[dict]:
+            """Get recent git commits with diffs that may have caused test failures."""
+            return env._scenario.get("recent_changes", [])
+
+        @mcp.tool
+        def submit_classification(test_id: str, category: str, evidence: str, recommendation: str) -> dict:
+            """Classify a failed test.
+            - test_id: the test identifier
+            - category: genuine_bug | flaky_test | environment_issue | stale_test
+            - evidence: describe what evidence led to your classification
+            - recommendation: fix_code | rerun | update_test | check_infra
+            """
+            if env._current_task != "test_triage":
+                return {"error": "submit_classification is only available for the test_triage task"}
+
+            env._test_classifications[test_id] = {
+                "category": category,
+                "evidence": evidence,
+                "recommendation": recommendation,
+            }
+
+            failed_tests = env._scenario.get("failed_tests", [])
+            classified_ids = set(env._test_classifications.keys())
+            all_ids = {t["test_id"] for t in failed_tests}
+            remaining = all_ids - classified_ids
+
+            if not remaining:
+                score = grade_test_triage(env._test_classifications, failed_tests)
+                env._final_score = score
+                env._done = True
+                return {"submitted": True, "test_id": test_id, "remaining": 0, "score": score, "done": True}
+
+            return {"submitted": True, "test_id": test_id, "remaining": len(remaining), "remaining_ids": list(remaining), "done": False}
+
+        # ── Task 3 Tools ──
+        @mcp.tool
+        def get_service_status() -> dict:
+            """Get health status of all services: healthy, degraded, or unhealthy."""
+            return env._scenario.get("service_statuses", {})
+
+        @mcp.tool
+        def get_service_metrics(service: str, metric: str) -> dict:
+            """Get a specific metric for a service. metric: cpu | memory | latency_ms | error_rate | throughput | connections."""
+            metrics = env._scenario.get("service_metrics", {})
+            if service in metrics and metric in metrics[service]:
+                return {"service": service, "metric": metric, "value": metrics[service][metric]}
+            if service not in metrics:
+                from .data.task3_outage_rca import _HEALTHY_METRICS
+                if metric in _HEALTHY_METRICS:
+                    return {"service": service, "metric": metric, "value": _HEALTHY_METRICS[metric]}
+                return {"error": f"Unknown metric '{metric}'. Valid: cpu, memory, latency_ms, error_rate, throughput, connections"}
+            return {"error": f"Unknown metric '{metric}'."}
+
+        @mcp.tool
+        def get_service_logs(service: str, level: str = "ALL", limit: int = 20) -> list[dict]:
+            """Get log entries from a specific service in the microservice cluster."""
+            logs_data = env._scenario.get("service_logs", {})
+            if service not in logs_data:
+                return [{"info": f"No logs available for '{service}'. This service may be operating normally."}]
+            logs = logs_data[service]
+            if level != "ALL":
+                logs = [e for e in logs if e["level"] == level.upper()]
+            return logs[:limit]
+
+        @mcp.tool
+        def get_service_config(service: str) -> dict:
+            """Get configuration for a service (version, replicas, limits, etc.)."""
+            configs = env._scenario.get("service_configs", {})
+            if service in configs:
+                return {"service": service, **configs[service]}
+            from .data.task3_outage_rca import _BASE_CONFIG
+            return {"service": service, **_BASE_CONFIG}
+
+        @mcp.tool
+        def get_dependency_graph() -> dict:
+            """Get the service dependency map showing which services depend on which."""
+            return SERVICE_TOPOLOGY
+
+        @mcp.tool
+        def trace_request(trace_id: str) -> dict:
+            """Get a distributed trace showing request flow through services. Use get_alert_history() to find trace IDs."""
+            for t in env._scenario.get("traces", []):
+                if t["trace_id"] == trace_id:
+                    return t
+            available = [t["trace_id"] for t in env._scenario.get("traces", [])]
+            return {"error": f"Trace '{trace_id}' not found. Available traces: {available}"}
+
+        @mcp.tool
+        def get_alert_history() -> list[dict]:
+            """Get recent alerts with timestamps, services, severities, and messages."""
+            alerts = env._scenario.get("alerts", [])
+            trace_ids = [t["trace_id"] for t in env._scenario.get("traces", [])]
+            return {"alerts": alerts, "available_trace_ids": trace_ids}
+
+        @mcp.tool
+        def submit_report(root_cause_service: str, root_cause_description: str, failure_chain: str, remediation_steps: str) -> dict:
+            """Submit incident report.
+            - root_cause_service: the service where the root cause originated
+            - root_cause_description: describe the root cause
+            - failure_chain: comma-separated service names in causal order (e.g. 'user-db,user-service,auth-service,api-gateway')
+            - remediation_steps: newline-separated remediation steps in priority order
+            """
+            if env._current_task != "outage_rca":
+                return {"error": "submit_report is only available for the outage_rca task"}
+            submitted = {
+                "root_cause_service": root_cause_service,
+                "root_cause_description": root_cause_description,
+                "failure_chain": failure_chain,
+                "remediation_steps": remediation_steps,
+            }
+            score = grade_outage_rca(submitted, env._scenario)
+            env._final_score = score
+            env._done = True
+            return {"submitted": True, "score": score, "done": True}
+
+    # ── Incremental Reward Logic ──
+
+    def _compute_step_reward(self, tool_name: str, tool_args: dict) -> float:
+        """Compute incremental reward for a single step based on which tool was called."""
+        reward = 0.0
+        action_key = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
+
+        # Repeat penalty
+        if action_key in self._action_history:
+            reward -= 0.02
+
+        self._action_history.append(action_key)
+
+        if self._current_task == "log_diagnosis":
+            step_threshold = 15
+            if tool_name == "get_logs":
+                svc = tool_args.get("service", "")
+                if svc and svc not in self._queried_services:
+                    self._queried_services.add(svc)
+                    if svc in self._scenario.get("relevant_services", []):
+                        reward += 0.02
+            elif tool_name == "search_logs":
+                kw = tool_args.get("keyword", "").lower()
+                if kw and kw not in self._search_terms_used:
+                    self._search_terms_used.add(kw)
+                    for term in self._scenario.get("relevant_search_terms", []):
+                        if term.lower() in kw or kw in term.lower():
+                            reward += 0.01
+                            break
+
+        elif self._current_task == "test_triage":
+            step_threshold = 20
+            if tool_name == "get_test_details":
+                tid = tool_args.get("test_id", "")
+                if tid and tid not in self._tests_inspected:
+                    self._tests_inspected.add(tid)
+                    failed_ids = {t["test_id"] for t in self._scenario.get("failed_tests", [])}
+                    if tid in failed_ids:
+                        reward += 0.03
+            elif tool_name == "get_test_history":
+                tid = tool_args.get("test_id", "")
+                if tid and tid not in self._tests_history_checked:
+                    self._tests_history_checked.add(tid)
+                    reward += 0.05
+            elif tool_name == "get_source_code":
+                fp = tool_args.get("file_path", "")
+                if fp and fp not in self._source_files_viewed:
+                    self._source_files_viewed.add(fp)
+                    if fp in self._scenario.get("source_files", {}):
+                        reward += 0.02
+
+        elif self._current_task == "outage_rca":
+            step_threshold = 25
+            statuses = self._scenario.get("service_statuses", {})
+            if tool_name == "get_service_status":
+                for svc, status in statuses.items():
+                    if status != "healthy" and svc not in self._rca_services_checked:
+                        self._rca_services_checked.add(svc)
+                        reward += 0.02
+            elif tool_name == "get_service_metrics":
+                svc = tool_args.get("service", "")
+                key = f"{svc}:{tool_args.get('metric', '')}"
+                if key not in self._rca_metrics_checked:
+                    self._rca_metrics_checked.add(key)
+                    if svc in self._scenario.get("service_metrics", {}):
+                        reward += 0.03
+            elif tool_name == "trace_request":
+                tid = tool_args.get("trace_id", "")
+                if tid and tid not in self._rca_traces_viewed:
+                    self._rca_traces_viewed.add(tid)
+                    reward += 0.05
+            elif tool_name == "get_service_logs":
+                svc = tool_args.get("service", "")
+                if svc and svc not in self._rca_logs_viewed:
+                    self._rca_logs_viewed.add(svc)
+                    root = self._scenario.get("root_cause_service", "")
+                    if svc == root:
+                        reward += 0.04
+                    elif statuses.get(svc) != "healthy":
+                        reward += 0.01
+        else:
+            step_threshold = 20
+
+        # Step penalty after threshold
+        if self._state.step_count > step_threshold:
+            reward -= 0.01
+
+        return reward
+
+    # ── Core Environment Methods ──
+
+    def reset(
+        self,
+        seed: Optional[int] = None,
+        episode_id: Optional[str] = None,
+        task: str = "log_diagnosis",
+        scenario_id: Optional[str] = None,
+        **kwargs: Any,
+    ) -> Observation:
+        if task not in TASK_NAMES:
+            return Observation(
+                done=True,
+                reward=0.0,
+                metadata={"error": f"Unknown task '{task}'. Valid: {sorted(TASK_NAMES)}"},
+            )
+
+        self._current_task = task
+
+        # Select scenario
+        if task == "log_diagnosis":
+            scenarios = TASK1_SCENARIOS
+        elif task == "test_triage":
+            scenarios = TASK2_SCENARIOS
+        else:
+            scenarios = TASK3_SCENARIOS
+
+        if scenario_id:
+            matching = [s for s in scenarios if s["id"] == scenario_id]
+            self._scenario = matching[0] if matching else random.choice(scenarios)
+        else:
+            self._scenario = random.choice(scenarios)
+
+        # Reset state
+        eid = episode_id or str(uuid4())
+        self._state = DevOpsState(
+            episode_id=eid,
+            step_count=0,
+            task=task,
+            scenario_id=self._scenario["id"],
+        )
+        self._done = False
+        self._accumulated_reward = 0.0
+        self._final_score = 0.0
+        self._action_history = []
+        self._queried_services = set()
+        self._search_terms_used = set()
+        self._tests_inspected = set()
+        self._tests_history_checked = set()
+        self._source_files_viewed = set()
+        self._rca_services_checked = set()
+        self._rca_metrics_checked = set()
+        self._rca_traces_viewed = set()
+        self._rca_logs_viewed = set()
+        self._test_classifications = {}
+
+        # Build initial observation message
+        description = self._scenario.get("description", "Investigate the incident.")
+        if task == "log_diagnosis":
+            tools_hint = "Tools: get_services(), get_logs(service, level, limit), search_logs(keyword), submit_diagnosis(incident_type, severity, affected_services, root_cause)"
+        elif task == "test_triage":
+            tools_hint = "Tools: get_test_summary(), get_test_details(test_id), get_test_history(test_id, num_runs), get_source_code(file_path), get_recent_changes(), submit_classification(test_id, category, evidence, recommendation)"
+            description = self._scenario.get("app_description", description)
+        else:
+            tools_hint = "Tools: get_service_status(), get_service_metrics(service, metric), get_service_logs(service, level, limit), get_service_config(service), get_dependency_graph(), trace_request(trace_id), get_alert_history(), submit_report(root_cause_service, root_cause_description, failure_chain, remediation_steps)"
+
+        return Observation(
+            done=False,
+            reward=0.0,
+            metadata={
+                "task": task,
+                "scenario_id": self._scenario["id"],
+                "description": description,
+                "tools": tools_hint,
+            },
+        )
+
+    def _step_impl(
+        self,
+        action: Action,
+        timeout_s: Optional[float] = None,
+        **kwargs: Any,
+    ) -> Observation:
+        return Observation(
+            done=False,
+            reward=0.0,
+            metadata={
+                "error": f"Unknown action type: {type(action).__name__}. Use ListToolsAction or CallToolAction."
+            },
+        )
+
+    def step(
+        self,
+        action: Action,
+        timeout_s: Optional[float] = None,
+        **kwargs: Any,
+    ) -> Observation:
+        self._state.step_count += 1
+
+        # Extract tool info before calling parent
+        tool_name = ""
+        tool_args = {}
+        if hasattr(action, "tool_name") and action.tool_name:
+            tool_name = action.tool_name
+        if hasattr(action, "arguments") and action.arguments:
+            tool_args = action.arguments if isinstance(action.arguments, dict) else {}
+
+        # Let MCPEnvironment handle the tool execution
+        obs = super().step(action, timeout_s=timeout_s, **kwargs)
+
+        # Compute incremental reward
+        step_reward = self._compute_step_reward(tool_name, tool_args)
+
+        # If a submission tool was called, add final score
+        if self._done:
+            step_reward += self._final_score
+
+        self._accumulated_reward += step_reward
+        self._state.accumulated_reward = round(self._accumulated_reward, 4)
+
+        # Mutate the observation in-place so serialization preserves its
+        # subclass fields (e.g. CallToolObservation.result, .tool_name)
+        obs.done = self._done
+        obs.reward = round(step_reward, 4)
+        return obs
+
+    async def step_async(
+        self,
+        action: Action,
+        timeout_s: Optional[float] = None,
+        **kwargs: Any,
+    ) -> Observation:
+        self._state.step_count += 1
+
+        tool_name = ""
+        tool_args = {}
+        if hasattr(action, "tool_name") and action.tool_name:
+            tool_name = action.tool_name
+        if hasattr(action, "arguments") and action.arguments:
+            tool_args = action.arguments if isinstance(action.arguments, dict) else {}
+
+        obs = await super().step_async(action, timeout_s=timeout_s, **kwargs)
+
+        step_reward = self._compute_step_reward(tool_name, tool_args)
+
+        if self._done:
+            step_reward += self._final_score
+
+        self._accumulated_reward += step_reward
+        self._state.accumulated_reward = round(self._accumulated_reward, 4)
+
+        # Mutate the observation in-place so serialization preserves its
+        # subclass fields (e.g. CallToolObservation.result, .tool_name)
+        obs.done = self._done
+        obs.reward = round(step_reward, 4)
+        return obs
+
+    @property
+    def state(self) -> DevOpsState:
+        return self._state
