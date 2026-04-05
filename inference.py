@@ -7,7 +7,7 @@ Required environment variables:
     API_BASE_URL   API endpoint for the LLM (default: https://router.huggingface.co/v1)
     MODEL_NAME     Model identifier (default: Qwen/Qwen2.5-72B-Instruct)
     HF_TOKEN       Hugging Face API token (required)
-    IMAGE_NAME     Docker image name for the environment (optional)
+    LOCAL_IMAGE_NAME  Docker image name for the environment (optional, for from_docker_image())
 """
 
 import asyncio
@@ -24,10 +24,10 @@ from openenv.core.env_server.mcp_types import CallToolAction
 
 # ── Environment Variables ──
 
-API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
+API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
+MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
 HF_TOKEN = os.getenv("HF_TOKEN")
-IMAGE_NAME = os.getenv("IMAGE_NAME")
+IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
 if HF_TOKEN is None:
     raise ValueError("HF_TOKEN environment variable is required")
@@ -138,7 +138,7 @@ def log_step(step: int, action: str, reward: float, done: bool, error: Optional[
 def log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
     rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} score={score:.2f} rewards={rewards_str}",
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}",
         flush=True,
     )
 
@@ -302,8 +302,10 @@ async def run_task(
         print(f"[DEBUG] Task error: {exc}", flush=True)
         score = 0.0
 
-    success = score > 0.1
-    log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+    finally:
+        success = score > 0.1
+        log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
+
     return score, steps_taken, rewards
 
 
