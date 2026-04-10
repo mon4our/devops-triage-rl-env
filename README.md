@@ -27,12 +27,13 @@ DevOps tasks like incident response, test triage, and outage investigation are p
 
 The agent queries production logs from a web service cluster to identify what incident is occurring.
 
-**Scenarios:** Database connection pool exhaustion, memory leak, TLS certificate expiration, rate limiting, disk space exhaustion.
+**Scenarios:** Database connection pool exhaustion, memory leak, TLS certificate expiration, rate limiting, disk space exhaustion, DNS resolution failure, message queue consumer lag, network timeout, database deadlock, cache poisoning.
 
 **Actions:**
 - `get_services()` — list available services
 - `get_logs(service, level, limit)` — retrieve log entries
 - `search_logs(keyword)` — search across all logs
+- `get_runbook(incident_type)` — look up operations runbook for diagnostic steps and remediation
 - `submit_diagnosis(incident_type, severity, affected_services, root_cause)` — submit answer
 
 **Observations:** Log entries with timestamp, level, service, and message fields.
@@ -51,6 +52,7 @@ The agent analyzes a completed E2E test suite run and classifies each of 5 faile
 - `get_test_history(test_id, num_runs)` — pass/fail history across CI runs
 - `get_source_code(file_path)` — view app or test source code
 - `get_recent_changes()` — recent git commits and diffs
+- `get_ci_config()` — CI/CD pipeline configuration (runner, timeouts, environment)
 - `submit_classification(test_id, category, evidence, recommendation)` — classify a test
 
 **Observations:** Test results, error messages, historical pass/fail data, source code, and git diffs.
@@ -69,6 +71,7 @@ The agent investigates a cascading outage across a microservice architecture (14
 - `get_dependency_graph()` — service dependency map
 - `trace_request(trace_id)` — distributed traces
 - `get_alert_history()` — alerts and available trace IDs
+- `get_deployment_history(service)` — recent deployments, optionally filtered by service
 - `submit_report(root_cause_service, root_cause_description, failure_chain, remediation_steps)` — submit report
 
 **Observations:** Service statuses, metrics, logs, configs, dependency graph, distributed traces, and alerts.

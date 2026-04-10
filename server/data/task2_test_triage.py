@@ -1423,4 +1423,977 @@ SCENARIOS = [
             ),
         },
     },
+
+    # ── Scenario 7: Analytics Dashboard ──
+    {
+        "id": "analytics_dashboard",
+        "app_description": "Analytics dashboard — real-time charts, data aggregation, and report generation E2E tests run on every PR via Playwright.",
+        "test_summary": {"total": 28, "passed": 23, "failed": 5, "skipped": 0},
+        "failed_tests": [
+            {
+                "test_id": "test_chart_data_aggregation",
+                "name": "Chart displays correct aggregated totals for selected metrics",
+                "category": "genuine_bug",
+                "error_output": (
+                    "AssertionError: Expected total revenue to be $142,500 but got $128,300\n"
+                    "  Missing $14,200 from rows where 'amount' column is NULL\n"
+                    "  at test/e2e/chart.spec.js:53"
+                ),
+                "stack_trace": (
+                    "Error: expect(received).toBe(expected)\n"
+                    "    at Object.<anonymous> (test/e2e/chart.spec.js:53:32)\n"
+                    "    at Object.asyncJestTest (node_modules/jest/build/jasmine.js:102:37)\n"
+                    "    at resolve (node_modules/jest/build/jasmine.js:64:11)"
+                ),
+                "console_logs": [
+                    "[INFO] Loading chart data for metric: revenue, period: Q1-2026",
+                    "[INFO] Query: SELECT SUM(amount) FROM transactions WHERE period = 'Q1-2026'",
+                    "[WARN] SUM returned 128300 but expected 142500 — 47 rows have NULL amount after migration 0042_add_nullable_amount",
+                    "[ERROR] Aggregation mismatch: NULL values excluded from SUM instead of treated as 0",
+                ],
+                "dom_snapshot": '<div class="chart-container"><div class="chart-total" data-testid="metric-total">$128,300</div><canvas id="revenue-chart" width="960" height="480"></canvas></div>',
+                "history": [True, True, True, True, True, True, True, True, True, False],
+                "recommendation": "fix_code",
+                "evidence_keywords": ["null", "aggregation", "SUM", "migration", "nullable", "recent change"],
+            },
+            {
+                "test_id": "test_date_range_filter",
+                "name": "Date range filter returns only data within selected start and end dates",
+                "category": "genuine_bug",
+                "error_output": (
+                    "AssertionError: Expected 15 results within 2026-03-01 to 2026-03-31 but got 18\n"
+                    "  3 extra results have timestamps on 2026-04-01 00:xx UTC (local timezone offset issue)\n"
+                    "  at test/e2e/filters.spec.js:71"
+                ),
+                "stack_trace": (
+                    "Error: expect(received).toBe(expected)\n"
+                    "    at Object.<anonymous> (test/e2e/filters.spec.js:71:28)\n"
+                    "    at Object.asyncJestTest (node_modules/jest/build/jasmine.js:102:37)"
+                ),
+                "console_logs": [
+                    "[INFO] Date range filter applied: 2026-03-01 to 2026-03-31",
+                    "[INFO] Query executed with WHERE created_at >= '2026-03-01' AND created_at < '2026-04-01'",
+                    "[WARN] 3 records returned with created_at='2026-04-01T00:15:00Z' — UTC vs America/New_York offset mismatch",
+                    "[ERROR] Date boundary conversion uses local timezone instead of UTC for comparison",
+                ],
+                "dom_snapshot": '<div class="filter-panel"><input type="date" value="2026-03-01" /><input type="date" value="2026-03-31" /><span class="result-count">18 results</span></div>',
+                "history": [True, True, True, True, True, True, True, True, False, False],
+                "recommendation": "fix_code",
+                "evidence_keywords": ["timezone", "UTC", "offset", "date range", "conversion", "regression"],
+            },
+            {
+                "test_id": "test_realtime_chart_update",
+                "name": "Real-time chart updates when new data arrives via WebSocket",
+                "category": "flaky_test",
+                "error_output": (
+                    "TimeoutError: Waiting for chart data point count to increase from 10 to 11 exceeded 5000ms\n"
+                    "  WebSocket message received at 4900ms but DOM update was not reflected\n"
+                    "  at test/e2e/realtime.spec.js:45"
+                ),
+                "stack_trace": (
+                    "TimeoutError: waiting for condition\n"
+                    "    at waitForFunction (node_modules/playwright/lib/frames.js:210:15)\n"
+                    "    at test/e2e/realtime.spec.js:45:22"
+                ),
+                "console_logs": [
+                    "[INFO] WebSocket connected to wss://analytics-ws.staging.internal/stream",
+                    "[INFO] Listening for real-time data updates on channel: revenue",
+                    "[WARN] WebSocket message received after 4900ms — close to 5000ms assertion timeout",
+                    "[INFO] Chart DOM updated at 5100ms — 100ms after assertion timeout",
+                ],
+                "dom_snapshot": '<div class="realtime-chart"><canvas id="live-chart"></canvas><span class="data-points">10 points</span><span class="ws-status">Connected</span></div>',
+                "history": [True, False, True, True, False, True, True, False, True, False],
+                "recommendation": "rerun",
+                "evidence_keywords": ["intermittent", "WebSocket", "timing", "race condition", "inconsistent", "flaky"],
+            },
+            {
+                "test_id": "test_export_csv_download",
+                "name": "Export CSV button downloads report file to local disk",
+                "category": "environment_issue",
+                "error_output": (
+                    "Error: Request to https://file-storage.staging.internal/v1/export failed\n"
+                    "  FetchError: connect ECONNREFUSED 10.0.5.88:443\n"
+                    "  at test/e2e/export.spec.js:29"
+                ),
+                "stack_trace": (
+                    "FetchError: request to https://file-storage.staging.internal/v1/export failed\n"
+                    "    reason: connect ECONNREFUSED 10.0.5.88:443\n"
+                    "    at ClientRequest.<anonymous> (node_modules/node-fetch/lib/index.js:1461:11)\n"
+                    "    at test/e2e/export.spec.js:29:18"
+                ),
+                "console_logs": [
+                    "[INFO] CSV export requested for report: Q1-2026 Revenue",
+                    "[INFO] Generating CSV via file-storage service at https://file-storage.staging.internal/v1/export",
+                    "[ERROR] file-storage.staging.internal:443 - ECONNREFUSED",
+                    "[ERROR] Staging file storage service is down — ops alert #SRE-1104 triggered at 09:12 UTC",
+                ],
+                "dom_snapshot": '<div class="export-panel"><button class="export-btn" disabled>Export CSV</button><div class="error-toast">File storage service unavailable</div></div>',
+                "history": [True, True, True, True, True, True, True, True, True, False],
+                "recommendation": "check_infra",
+                "evidence_keywords": ["staging", "file storage", "ECONNREFUSED", "infrastructure", "download", "service down"],
+            },
+            {
+                "test_id": "test_legacy_pie_chart_render",
+                "name": "Legacy pie chart renders with correct segment colors and labels",
+                "category": "stale_test",
+                "error_output": (
+                    "AssertionError: Expected element '.pie-chart-segment' to exist but found 0 matches\n"
+                    "  Component class was renamed from 'pie-chart-segment' to 'donut-segment' in UI refactor\n"
+                    "  at test/e2e/pie-chart.spec.js:38"
+                ),
+                "stack_trace": (
+                    "Error: expect(received).toBeGreaterThan(0)\n"
+                    "    at Object.<anonymous> (test/e2e/pie-chart.spec.js:38:46)"
+                ),
+                "console_logs": [
+                    "[INFO] Rendering chart type: donut (migrated from pie)",
+                    "[INFO] Component PieChart renamed to DonutChart 3 weeks ago (PR #847)",
+                    "[WARN] CSS class .pie-chart-segment no longer exists — replaced by .donut-segment",
+                ],
+                "dom_snapshot": '<div class="chart-wrapper"><svg class="donut-chart"><path class="donut-segment" d="M10,80 A70,70 0 0,1 80,10" fill="#4CAF50"/><path class="donut-segment" d="M80,10 A70,70 0 0,1 150,80" fill="#FF9800"/></svg></div>',
+                "history": [False, False, False, False, False, False, False, False, False, False],
+                "recommendation": "update_test",
+                "evidence_keywords": ["outdated", "renamed", "class name", "refactor", "stale", "always fails"],
+            },
+        ],
+        "recent_changes": [
+            {
+                "commit": "f8a2c1d",
+                "author": "priya.dev",
+                "message": "Add nullable amount column to transactions table (migration 0042)",
+                "files_changed": ["src/db/migrations/0042_add_nullable_amount.sql", "src/services/aggregation.js"],
+                "diff": (
+                    "--- a/src/services/aggregation.js\n"
+                    "+++ b/src/services/aggregation.js\n"
+                    "@@ -12,6 +12,7 @@\n"
+                    " async function getTotal(metric, period) {\n"
+                    "   const query = `SELECT SUM(amount) AS total FROM transactions WHERE period = $1`;\n"
+                    "-  // amount was NOT NULL, SUM always correct\n"
+                    "+  // amount is now nullable after migration 0042\n"
+                    "+  // BUG: SUM ignores NULL rows — should use COALESCE(amount, 0)\n"
+                    "   const result = await db.query(query, [period]);\n"
+                    "   return result.rows[0].total;\n"
+                    " }\n"
+                ),
+            },
+            {
+                "commit": "b3e7d9f",
+                "author": "carlos.dev",
+                "message": "Fix date range filter to use server timestamps consistently",
+                "files_changed": ["src/filters/dateRange.js"],
+                "diff": (
+                    "--- a/src/filters/dateRange.js\n"
+                    "+++ b/src/filters/dateRange.js\n"
+                    "@@ -7,5 +7,5 @@\n"
+                    " function buildDateFilter(start, end) {\n"
+                    "-  const startUTC = new Date(start).toISOString();\n"
+                    "-  const endUTC = new Date(end).toISOString();\n"
+                    "+  const startUTC = new Date(start).toLocaleDateString(); // BUG: uses local timezone\n"
+                    "+  const endUTC = new Date(end).toLocaleDateString();     // BUG: should be toISOString()\n"
+                    "   return { start: startUTC, end: endUTC };\n"
+                    " }\n"
+                ),
+            },
+            {
+                "commit": "d5f1a4e",
+                "author": "nina.dev",
+                "message": "Refactor pie chart to donut chart with new component library (PR #847)",
+                "files_changed": ["src/components/DonutChart.jsx", "src/components/PieChart.jsx"],
+                "diff": (
+                    "--- a/src/components/PieChart.jsx\n"
+                    "+++ /dev/null\n"
+                    "@@ -1,15 +0,0 @@\n"
+                    "-import React from 'react';\n"
+                    "-function PieChart({ data }) {\n"
+                    "-  return <svg className='pie-chart'>...</svg>;\n"
+                    "-}\n"
+                    "--- /dev/null\n"
+                    "+++ b/src/components/DonutChart.jsx\n"
+                    "@@ -0,0 +1,18 @@\n"
+                    "+import React from 'react';\n"
+                    "+function DonutChart({ data }) {\n"
+                    "+  return (\n"
+                    "+    <svg className='donut-chart'>\n"
+                    "+      {data.map(seg => <path className='donut-segment' ... />)}\n"
+                    "+    </svg>\n"
+                    "+  );\n"
+                    "+}\n"
+                ),
+            },
+        ],
+        "source_files": {
+            "src/services/aggregation.js": (
+                "const db = require('../db/connection');\n\n"
+                "async function getTotal(metric, period) {\n"
+                "  const query = `SELECT SUM(amount) AS total FROM transactions WHERE period = $1`;\n"
+                "  // amount is now nullable after migration 0042\n"
+                "  // SUM ignores NULL rows — should use COALESCE(amount, 0)\n"
+                "  const result = await db.query(query, [period]);\n"
+                "  return result.rows[0].total;\n"
+                "}\n\n"
+                "module.exports = { getTotal };\n"
+            ),
+            "src/filters/dateRange.js": (
+                "function buildDateFilter(start, end) {\n"
+                "  const startUTC = new Date(start).toLocaleDateString(); // BUG: should be toISOString()\n"
+                "  const endUTC = new Date(end).toLocaleDateString();     // BUG: should be toISOString()\n"
+                "  return { start: startUTC, end: endUTC };\n"
+                "}\n\n"
+                "module.exports = { buildDateFilter };\n"
+            ),
+            "src/components/DonutChart.jsx": (
+                "import React from 'react';\n\n"
+                "function DonutChart({ data }) {\n"
+                "  return (\n"
+                "    <svg className='donut-chart'>\n"
+                "      {data.map((seg, i) => (\n"
+                "        <path key={i} className='donut-segment' d={seg.path} fill={seg.color} />\n"
+                "      ))}\n"
+                "    </svg>\n"
+                "  );\n"
+                "}\n\n"
+                "export default DonutChart;\n"
+            ),
+            "test/e2e/chart.spec.js": (
+                "const { test, expect } = require('@playwright/test');\n\n"
+                "test('chart data aggregation shows correct total', async ({ page }) => {\n"
+                "  await page.goto('/analytics/revenue?period=Q1-2026');\n"
+                "  await page.waitForSelector('[data-testid=\"metric-total\"]');\n"
+                "  const total = await page.textContent('[data-testid=\"metric-total\"]');\n"
+                "  expect(total).toBe('$142,500'); // line 53\n"
+                "});\n"
+            ),
+        },
+    },
+
+    # ── Scenario 8: Notification Center ──
+    {
+        "id": "notification_center",
+        "app_description": "Notification center — WebSocket delivery, email templates, push notifications, and preference management E2E tests.",
+        "test_summary": {"total": 22, "passed": 17, "failed": 5, "skipped": 0},
+        "failed_tests": [
+            {
+                "test_id": "test_email_template_render",
+                "name": "Email template renders with all user variables populated",
+                "category": "genuine_bug",
+                "error_output": (
+                    "AssertionError: Expected email body to contain 'Hello, Alice' but got 'Hello, undefined'\n"
+                    "  Template variable {{user.first_name}} is undefined after field rename\n"
+                    "  at test/e2e/email-template.spec.js:34"
+                ),
+                "stack_trace": (
+                    "Error: expect(received).toContain(expected)\n"
+                    "    at Object.<anonymous> (test/e2e/email-template.spec.js:34:31)\n"
+                    "    at Object.asyncJestTest (node_modules/jest/build/jasmine.js:102:37)"
+                ),
+                "console_logs": [
+                    "[INFO] Rendering email template: welcome_email for user_id=u-5001",
+                    "[INFO] Template context: {user: {name: 'Alice Johnson', email: 'alice@example.com'}}",
+                    "[WARN] Template variable 'user.first_name' resolved to undefined — field was renamed to 'user.name'",
+                    "[ERROR] Email body contains 'Hello, undefined' — template not updated after user model refactor",
+                ],
+                "dom_snapshot": '<div class="email-preview"><div class="email-body"><p>Hello, undefined</p><p>Welcome to our platform!</p></div></div>',
+                "history": [True, True, True, True, True, True, True, True, True, False],
+                "recommendation": "fix_code",
+                "evidence_keywords": ["template", "variable", "undefined", "renamed", "user field", "regression"],
+            },
+            {
+                "test_id": "test_push_notification_delivery",
+                "name": "Push notification payload is delivered to device endpoint",
+                "category": "genuine_bug",
+                "error_output": (
+                    "Error: Push notification payload size 4,312 bytes exceeds 4,096 byte limit\n"
+                    "  PayloadTooLargeError: FCM rejects payloads > 4KB\n"
+                    "  at test/e2e/push-notification.spec.js:48"
+                ),
+                "stack_trace": (
+                    "PayloadTooLargeError: Payload size 4312 exceeds limit 4096\n"
+                    "    at validatePayload (src/notifications/push.js:28:11)\n"
+                    "    at sendPush (src/notifications/push.js:45:5)\n"
+                    "    at test/e2e/push-notification.spec.js:48:22"
+                ),
+                "console_logs": [
+                    "[INFO] Building push notification for event: new_message",
+                    "[INFO] Payload includes fields: title, body, icon, badge, data.sender, data.preview, data.actions, data.deepLink",
+                    "[WARN] Payload size: 4312 bytes (limit: 4096 bytes) — exceeded after adding data.actions and data.deepLink",
+                    "[ERROR] FCM rejected payload: PayloadTooLargeError — notification not delivered",
+                ],
+                "dom_snapshot": '<div class="push-config"><span class="payload-size">4,312 bytes</span><span class="limit">4,096 bytes</span><span class="status error">Rejected</span></div>',
+                "history": [True, True, True, True, True, True, True, True, True, False],
+                "recommendation": "fix_code",
+                "evidence_keywords": ["payload", "size", "4KB", "limit", "exceeded", "new fields", "regression"],
+            },
+            {
+                "test_id": "test_websocket_reconnection",
+                "name": "WebSocket reconnects automatically after connection drop",
+                "category": "flaky_test",
+                "error_output": (
+                    "TimeoutError: WebSocket did not reconnect within 8000ms after simulated disconnect\n"
+                    "  Reconnect attempt observed at 7500ms but handshake completed at 8200ms\n"
+                    "  at test/e2e/ws-reconnect.spec.js:62"
+                ),
+                "stack_trace": (
+                    "TimeoutError: waiting for WebSocket readyState to become OPEN\n"
+                    "    at waitForCondition (node_modules/playwright/lib/frames.js:210:15)\n"
+                    "    at test/e2e/ws-reconnect.spec.js:62:20"
+                ),
+                "console_logs": [
+                    "[INFO] WebSocket connected to wss://notif.staging.internal/ws",
+                    "[INFO] Simulating connection drop (readyState -> CLOSED)",
+                    "[WARN] Reconnect backoff: attempt 1 at 2000ms, attempt 2 at 4000ms, attempt 3 at 7500ms",
+                    "[INFO] Reconnect handshake completed at 8200ms — 200ms after assertion timeout",
+                ],
+                "dom_snapshot": '<div class="ws-status"><span class="indicator reconnecting">Reconnecting...</span><span class="attempt">Attempt 3/5</span></div>',
+                "history": [True, False, True, False, True, True, False, True, True, False],
+                "recommendation": "rerun",
+                "evidence_keywords": ["reconnect", "timing", "WebSocket", "intermittent", "race condition"],
+            },
+            {
+                "test_id": "test_sms_gateway_integration",
+                "name": "SMS notification is sent via gateway and delivery receipt received",
+                "category": "environment_issue",
+                "error_output": (
+                    "Error: POST https://sms-gateway.sandbox.twilio.com/v1/messages returned 401 Unauthorized\n"
+                    "  AuthenticationError: Invalid credentials — sandbox API key expired\n"
+                    "  at test/e2e/sms-gateway.spec.js:25"
+                ),
+                "stack_trace": (
+                    "AuthenticationError: 401 Unauthorized\n"
+                    "    at SMSClient.send (src/notifications/smsClient.js:18:11)\n"
+                    "    at test/e2e/sms-gateway.spec.js:25:28"
+                ),
+                "console_logs": [
+                    "[INFO] Sending SMS via sandbox gateway to +1-555-0199",
+                    "[ERROR] SMS gateway returned 401: 'API key expired on 2026-04-01. Rotate credentials in vault.'",
+                    "[ERROR] Sandbox credentials last rotated: 2026-01-01 — expired after 90-day TTL",
+                    "[WARN] SMS delivery failed — check credential rotation schedule in ops vault",
+                ],
+                "dom_snapshot": '<div class="sms-status"><span class="delivery-status error">Authentication Failed</span><span class="error-code">401</span></div>',
+                "history": [True, True, True, True, True, True, True, True, True, False],
+                "recommendation": "check_infra",
+                "evidence_keywords": ["credentials", "expired", "sandbox", "SMS gateway", "401", "authentication"],
+            },
+            {
+                "test_id": "test_notification_badge_count",
+                "name": "Notification badge displays correct count of pending items",
+                "category": "stale_test",
+                "error_output": (
+                    "AssertionError: Expected badge count to be 7 (total) but got 3 (unread only)\n"
+                    "  Badge logic changed from total notifications to unread-only 2 sprints ago\n"
+                    "  at test/e2e/badge.spec.js:41"
+                ),
+                "stack_trace": (
+                    "Error: expect(received).toBe(expected)\n"
+                    "    at Object.<anonymous> (test/e2e/badge.spec.js:41:34)"
+                ),
+                "console_logs": [
+                    "[INFO] Fetching notification count for user_id=u-3001",
+                    "[INFO] API returned: {total: 7, unread: 3, read: 4}",
+                    "[INFO] Badge component renders unread count: 3 (changed from total in sprint 22, JIRA-5890)",
+                ],
+                "dom_snapshot": '<div class="notif-header"><span class="badge-count" data-testid="badge">3</span></div>',
+                "history": [False, False, False, False, False, False, True, True, True, True],
+                "recommendation": "update_test",
+                "evidence_keywords": ["outdated", "badge count", "unread", "logic changed", "stale"],
+            },
+        ],
+        "recent_changes": [
+            {
+                "commit": "a9c4e2b",
+                "author": "raj.dev",
+                "message": "Rename user.first_name to user.name in user model (JIRA-5721)",
+                "files_changed": ["src/models/user.js", "src/templates/welcome_email.hbs"],
+                "diff": (
+                    "--- a/src/models/user.js\n"
+                    "+++ b/src/models/user.js\n"
+                    "@@ -5,4 +5,4 @@\n"
+                    " const userSchema = {\n"
+                    "-  first_name: { type: String, required: true },\n"
+                    "-  last_name: { type: String, required: true },\n"
+                    "+  name: { type: String, required: true },  // consolidated first + last\n"
+                    "   email: { type: String, required: true },\n"
+                    " };\n"
+                    "--- a/src/templates/welcome_email.hbs\n"
+                    "+++ b/src/templates/welcome_email.hbs\n"
+                    "@@ -1,3 +1,3 @@\n"
+                    "-<p>Hello, {{user.first_name}}</p>\n"
+                    "+<p>Hello, {{user.first_name}}</p>  {{!-- BUG: should be user.name --}}\n"
+                ),
+            },
+            {
+                "commit": "c7f1d8a",
+                "author": "mei.dev",
+                "message": "Add deep link and action buttons to push notification payload",
+                "files_changed": ["src/notifications/push.js"],
+                "diff": (
+                    "--- a/src/notifications/push.js\n"
+                    "+++ b/src/notifications/push.js\n"
+                    "@@ -18,6 +18,10 @@\n"
+                    " function buildPayload(event, data) {\n"
+                    "   const payload = {\n"
+                    "     title: event.title,\n"
+                    "     body: event.body,\n"
+                    "     icon: event.icon,\n"
+                    "+    data: {\n"
+                    "+      ...data,\n"
+                    "+      actions: JSON.stringify(event.actions),  // adds ~200 bytes\n"
+                    "+      deepLink: event.deepLink,                // adds ~150 bytes\n"
+                    "+    },\n"
+                    "   };\n"
+                    "+  // Total payload now exceeds 4KB FCM limit\n"
+                    "   return payload;\n"
+                    " }\n"
+                ),
+            },
+            {
+                "commit": "e2b6a3d",
+                "author": "sam.dev",
+                "message": "Switch notification badge from total count to unread-only (JIRA-5890)",
+                "files_changed": ["src/components/NotificationBadge.jsx"],
+                "diff": (
+                    "--- a/src/components/NotificationBadge.jsx\n"
+                    "+++ b/src/components/NotificationBadge.jsx\n"
+                    "@@ -8,4 +8,4 @@\n"
+                    " function NotificationBadge({ notifications }) {\n"
+                    "-  const count = notifications.total;\n"
+                    "+  const count = notifications.unread; // show unread only per JIRA-5890\n"
+                    "   return <span className='badge-count' data-testid='badge'>{count}</span>;\n"
+                    " }\n"
+                ),
+            },
+        ],
+        "source_files": {
+            "src/templates/welcome_email.hbs": (
+                "<html>\n"
+                "<body>\n"
+                "  <p>Hello, {{user.first_name}}</p>\n"
+                "  <!-- BUG: user.first_name was renamed to user.name -->\n"
+                "  <p>Welcome to our platform!</p>\n"
+                "  <p>Your account ({{user.email}}) is ready.</p>\n"
+                "</body>\n"
+                "</html>\n"
+            ),
+            "src/notifications/push.js": (
+                "const FCM_PAYLOAD_LIMIT = 4096;\n\n"
+                "function validatePayload(payload) {\n"
+                "  const size = Buffer.byteLength(JSON.stringify(payload));\n"
+                "  if (size > FCM_PAYLOAD_LIMIT) {\n"
+                "    throw new PayloadTooLargeError(`Payload size ${size} exceeds limit ${FCM_PAYLOAD_LIMIT}`);\n"
+                "  }\n"
+                "}\n\n"
+                "function buildPayload(event, data) {\n"
+                "  const payload = {\n"
+                "    title: event.title,\n"
+                "    body: event.body,\n"
+                "    icon: event.icon,\n"
+                "    data: {\n"
+                "      ...data,\n"
+                "      actions: JSON.stringify(event.actions),\n"
+                "      deepLink: event.deepLink,\n"
+                "    },\n"
+                "  };\n"
+                "  return payload;\n"
+                "}\n\n"
+                "module.exports = { buildPayload, validatePayload };\n"
+            ),
+            "src/components/NotificationBadge.jsx": (
+                "import React from 'react';\n\n"
+                "function NotificationBadge({ notifications }) {\n"
+                "  const count = notifications.unread; // show unread only per JIRA-5890\n"
+                "  return <span className='badge-count' data-testid='badge'>{count}</span>;\n"
+                "}\n\n"
+                "export default NotificationBadge;\n"
+            ),
+            "test/e2e/email-template.spec.js": (
+                "const { test, expect } = require('@playwright/test');\n\n"
+                "test('email template renders user name', async ({ page }) => {\n"
+                "  await page.goto('/admin/templates/preview/welcome_email?user=u-5001');\n"
+                "  const body = await page.textContent('.email-body');\n"
+                "  expect(body).toContain('Hello, Alice'); // line 34\n"
+                "});\n"
+            ),
+        },
+    },
+
+    # ── Scenario 9: Search Engine ──
+    {
+        "id": "search_engine",
+        "app_description": "Search engine — full-text search, faceted filters, autocomplete, and relevance scoring E2E tests.",
+        "test_summary": {"total": 20, "passed": 15, "failed": 5, "skipped": 0},
+        "failed_tests": [
+            {
+                "test_id": "test_search_relevance_scoring",
+                "name": "Search results are ranked by relevance score in descending order",
+                "category": "genuine_bug",
+                "error_output": (
+                    "AssertionError: Expected first result to be 'Python Tutorial' (score 0.95) but got 'Cooking Basics' (score 0.42)\n"
+                    "  Relevance scoring boosting weights were changed in recent commit\n"
+                    "  at test/e2e/search-relevance.spec.js:39"
+                ),
+                "stack_trace": (
+                    "Error: expect(received).toBe(expected)\n"
+                    "    at Object.<anonymous> (test/e2e/search-relevance.spec.js:39:30)\n"
+                    "    at Object.asyncJestTest (node_modules/jest/build/jasmine.js:102:37)"
+                ),
+                "console_logs": [
+                    "[INFO] Search query: 'python programming' executed against index 'articles'",
+                    "[INFO] Boosting weights applied: title=5.0, body=1.0, tags=3.0 (changed from title=2.0, body=1.0, tags=1.0)",
+                    "[WARN] Result #1: 'Cooking Basics' (score=0.42, boosted by tag match 'basics') — expected 'Python Tutorial'",
+                    "[ERROR] Relevance scoring regression: title boost too high relative to exact-match body content",
+                ],
+                "dom_snapshot": '<div class="search-results"><div class="result" data-rank="1"><h3>Cooking Basics</h3><span class="score">0.42</span></div><div class="result" data-rank="2"><h3>Python Tutorial</h3><span class="score">0.38</span></div></div>',
+                "history": [True, True, True, True, True, True, True, True, True, False],
+                "recommendation": "fix_code",
+                "evidence_keywords": ["relevance", "scoring", "boost", "weight", "ranking", "regression"],
+            },
+            {
+                "test_id": "test_facet_count_accuracy",
+                "name": "Facet filter counts match the number of actual results in each category",
+                "category": "genuine_bug",
+                "error_output": (
+                    "AssertionError: Facet 'Electronics' shows count 45 but filtered results returned 38 items\n"
+                    "  Index not rebuilt after schema change — stale facet counts\n"
+                    "  at test/e2e/facets.spec.js:52"
+                ),
+                "stack_trace": (
+                    "Error: expect(received).toBe(expected)\n"
+                    "    at Object.<anonymous> (test/e2e/facets.spec.js:52:36)\n"
+                    "    at Object.asyncJestTest (node_modules/jest/build/jasmine.js:102:37)"
+                ),
+                "console_logs": [
+                    "[INFO] Loading facets for query: '*' with category aggregation",
+                    "[WARN] Facet count for 'Electronics': 45 (from cached index), actual filtered count: 38",
+                    "[ERROR] Index was last rebuilt on 2026-03-28, schema changed on 2026-03-30 — 7 products recategorized",
+                    "[WARN] Stale index causing facet count mismatch — run reindex to fix",
+                ],
+                "dom_snapshot": '<div class="facets"><div class="facet"><label>Electronics</label><span class="count">45</span></div><div class="facet"><label>Books</label><span class="count">120</span></div></div>',
+                "history": [True, True, True, True, True, True, True, True, False, False],
+                "recommendation": "fix_code",
+                "evidence_keywords": ["facet", "count", "mismatch", "index", "schema", "rebuild"],
+            },
+            {
+                "test_id": "test_autocomplete_suggestions",
+                "name": "Autocomplete dropdown shows relevant suggestions as user types",
+                "category": "flaky_test",
+                "error_output": (
+                    "TimeoutError: Expected autocomplete dropdown to show 5 suggestions within 2000ms but found 0\n"
+                    "  Debounce delay plus API latency exceeded assertion timeout\n"
+                    "  at test/e2e/autocomplete.spec.js:28"
+                ),
+                "stack_trace": (
+                    "TimeoutError: waiting for selector '.suggestion-item' count to be 5\n"
+                    "    at waitForFunction (node_modules/playwright/lib/frames.js:210:15)\n"
+                    "    at test/e2e/autocomplete.spec.js:28:18"
+                ),
+                "console_logs": [
+                    "[INFO] User typed: 'pyth' in search box",
+                    "[INFO] Debounce timer: waiting 300ms before sending autocomplete request",
+                    "[WARN] Autocomplete API response took 1850ms on CI (normally ~200ms locally)",
+                    "[INFO] Suggestions rendered at 2150ms — 150ms after assertion timeout",
+                ],
+                "dom_snapshot": '<div class="search-box"><input type="text" value="pyth" /><div class="autocomplete-dropdown"><div class="loading">Loading...</div></div></div>',
+                "history": [True, True, False, True, False, True, True, False, True, True],
+                "recommendation": "rerun",
+                "evidence_keywords": ["debounce", "timing", "autocomplete", "inconsistent", "race condition"],
+            },
+            {
+                "test_id": "test_elasticsearch_bulk_index",
+                "name": "Bulk indexing operation completes and all documents are searchable",
+                "category": "environment_issue",
+                "error_output": (
+                    "Error: Elasticsearch bulk index request failed\n"
+                    "  ClusterBlockException: index [articles] blocked by: [FORBIDDEN/12/index read-only / allow delete (api)]\n"
+                    "  at test/e2e/bulk-index.spec.js:19"
+                ),
+                "stack_trace": (
+                    "ClusterBlockException: [FORBIDDEN/12/index read-only]\n"
+                    "    at ElasticsearchClient.bulk (src/search/esClient.js:45:11)\n"
+                    "    at test/e2e/bulk-index.spec.js:19:24"
+                ),
+                "console_logs": [
+                    "[INFO] Starting bulk index of 500 documents to index 'articles'",
+                    "[ERROR] Elasticsearch cluster responded with 403: index read-only (disk full)",
+                    "[ERROR] Staging ES cluster disk usage: 94.7% — threshold is 90%, cluster auto-locked to read-only",
+                    "[WARN] Ops alert #SRE-1220: Elasticsearch staging cluster disk full — needs cleanup",
+                ],
+                "dom_snapshot": '<div class="index-status"><span class="cluster-health red">RED</span><span class="disk-usage">94.7%</span><span class="index-state">READ-ONLY</span></div>',
+                "history": [True, True, True, True, True, True, True, True, True, False],
+                "recommendation": "check_infra",
+                "evidence_keywords": ["Elasticsearch", "disk", "full", "staging", "cluster", "infrastructure"],
+            },
+            {
+                "test_id": "test_search_pagination_v1",
+                "name": "Search pagination returns correct page of results using offset/limit",
+                "category": "stale_test",
+                "error_output": (
+                    "AssertionError: Expected response to have 'offset' and 'limit' fields but got 'cursor' and 'pageSize'\n"
+                    "  v1 pagination API was replaced by cursor-based pagination in v2\n"
+                    "  at test/e2e/pagination-v1.spec.js:33"
+                ),
+                "stack_trace": (
+                    "Error: expect(received).toHaveProperty('offset')\n"
+                    "    at Object.<anonymous> (test/e2e/pagination-v1.spec.js:33:26)"
+                ),
+                "console_logs": [
+                    "[INFO] GET /api/v1/search?q=test&offset=20&limit=10 — endpoint deprecated",
+                    "[WARN] v1 pagination API removed in favor of cursor-based v2 (PR #912)",
+                    "[INFO] Redirected to /api/v2/search?q=test&cursor=abc123&pageSize=10",
+                    "[INFO] Response contains: {cursor: 'abc123', pageSize: 10, results: [...]} — no offset/limit fields",
+                ],
+                "dom_snapshot": '<div class="pagination"><button class="load-more" data-cursor="abc123">Load More</button></div>',
+                "history": [False, False, False, False, False, False, False, False, False, False],
+                "recommendation": "update_test",
+                "evidence_keywords": ["deprecated", "v1", "pagination", "cursor", "replaced", "stale"],
+            },
+        ],
+        "recent_changes": [
+            {
+                "commit": "h4k7m2n",
+                "author": "alex.dev",
+                "message": "Adjust search relevance boosting weights for title and tags",
+                "files_changed": ["src/search/relevance.js", "src/search/config.json"],
+                "diff": (
+                    "--- a/src/search/config.json\n"
+                    "+++ b/src/search/config.json\n"
+                    "@@ -3,5 +3,5 @@\n"
+                    ' "boostWeights": {\n'
+                    '-    "title": 2.0,\n'
+                    '-    "body": 1.0,\n'
+                    '-    "tags": 1.0\n'
+                    '+    "title": 5.0,\n'
+                    '+    "body": 1.0,\n'
+                    '+    "tags": 3.0\n'
+                    " }\n"
+                ),
+            },
+            {
+                "commit": "p5q8r1s",
+                "author": "dana.dev",
+                "message": "Recategorize 7 products from Electronics to Gadgets in catalog schema",
+                "files_changed": ["src/catalog/schema.js", "src/db/migrations/0055_recategorize_products.sql"],
+                "diff": (
+                    "--- a/src/db/migrations/0055_recategorize_products.sql\n"
+                    "+++ b/src/db/migrations/0055_recategorize_products.sql\n"
+                    "@@ -0,0 +1,3 @@\n"
+                    "+UPDATE products SET category = 'Gadgets' WHERE id IN (101,102,103,104,105,106,107);\n"
+                    "+-- NOTE: Elasticsearch index must be rebuilt after this migration\n"
+                    "+-- TODO: add reindex step to CI pipeline\n"
+                ),
+            },
+            {
+                "commit": "t6u9v3w",
+                "author": "alex.dev",
+                "message": "Replace v1 offset/limit pagination with cursor-based pagination (PR #912)",
+                "files_changed": ["src/api/search.js", "src/search/paginator.js"],
+                "diff": (
+                    "--- a/src/api/search.js\n"
+                    "+++ b/src/api/search.js\n"
+                    "@@ -12,8 +12,8 @@\n"
+                    " router.get('/api/v2/search', async (req, res) => {\n"
+                    "-  const { q, offset = 0, limit = 10 } = req.query;\n"
+                    "-  const results = await search(q, { offset, limit });\n"
+                    "-  res.json({ results, offset, limit, total: results.total });\n"
+                    "+  const { q, cursor, pageSize = 10 } = req.query;\n"
+                    "+  const results = await search(q, { cursor, pageSize });\n"
+                    "+  res.json({ results: results.items, cursor: results.nextCursor, pageSize });\n"
+                    " });\n"
+                ),
+            },
+        ],
+        "source_files": {
+            "src/search/relevance.js": (
+                "const config = require('./config.json');\n\n"
+                "function scoreDocument(query, doc) {\n"
+                "  const titleScore = matchScore(query, doc.title) * config.boostWeights.title;\n"
+                "  const bodyScore = matchScore(query, doc.body) * config.boostWeights.body;\n"
+                "  const tagScore = matchScore(query, doc.tags.join(' ')) * config.boostWeights.tags;\n"
+                "  return titleScore + bodyScore + tagScore;\n"
+                "}\n\n"
+                "function matchScore(query, text) {\n"
+                "  // TF-IDF based scoring\n"
+                "  const terms = query.toLowerCase().split(' ');\n"
+                "  return terms.reduce((score, term) => {\n"
+                "    return score + (text.toLowerCase().includes(term) ? 1 : 0);\n"
+                "  }, 0) / terms.length;\n"
+                "}\n\n"
+                "module.exports = { scoreDocument };\n"
+            ),
+            "src/search/esClient.js": (
+                "const { Client } = require('@elastic/elasticsearch');\n\n"
+                "const client = new Client({ node: process.env.ES_URL || 'http://localhost:9200' });\n\n"
+                "async function bulk(index, documents) {\n"
+                "  const body = documents.flatMap(doc => [\n"
+                "    { index: { _index: index, _id: doc.id } },\n"
+                "    doc,\n"
+                "  ]);\n"
+                "  const result = await client.bulk({ body });\n"
+                "  if (result.errors) throw new Error('Bulk index failed');\n"
+                "  return result;\n"
+                "}\n\n"
+                "module.exports = { bulk, client };\n"
+            ),
+            "src/api/search.js": (
+                "const express = require('express');\n"
+                "const { search } = require('../search/engine');\n"
+                "const router = express.Router();\n\n"
+                "router.get('/api/v2/search', async (req, res) => {\n"
+                "  const { q, cursor, pageSize = 10 } = req.query;\n"
+                "  const results = await search(q, { cursor, pageSize });\n"
+                "  res.json({ results: results.items, cursor: results.nextCursor, pageSize });\n"
+                "});\n\n"
+                "module.exports = router;\n"
+            ),
+            "test/e2e/search-relevance.spec.js": (
+                "const { test, expect } = require('@playwright/test');\n\n"
+                "test('search results ranked by relevance', async ({ page }) => {\n"
+                "  await page.goto('/search?q=python+programming');\n"
+                "  await page.waitForSelector('.result');\n"
+                "  const firstResult = await page.textContent('.result[data-rank=\"1\"] h3');\n"
+                "  expect(firstResult).toBe('Python Tutorial'); // line 39\n"
+                "});\n"
+            ),
+        },
+    },
+
+    # ── Scenario 10: Authentication Flow ──
+    {
+        "id": "authentication_flow",
+        "app_description": "Authentication flow — OAuth, MFA, session management, password reset, and account security E2E tests.",
+        "test_summary": {"total": 26, "passed": 21, "failed": 5, "skipped": 0},
+        "failed_tests": [
+            {
+                "test_id": "test_mfa_totp_validation",
+                "name": "MFA TOTP code validation accepts valid 6-digit codes within time window",
+                "category": "genuine_bug",
+                "error_output": (
+                    "AssertionError: Expected TOTP validation to return true but got false\n"
+                    "  Valid TOTP code '482951' rejected — time window narrowed from +-1 to +-0 steps\n"
+                    "  at test/e2e/mfa-totp.spec.js:44"
+                ),
+                "stack_trace": (
+                    "Error: expect(received).toBe(true)\n"
+                    "    at Object.<anonymous> (test/e2e/mfa-totp.spec.js:44:38)\n"
+                    "    at Object.asyncJestTest (node_modules/jest/build/jasmine.js:102:37)"
+                ),
+                "console_logs": [
+                    "[INFO] TOTP validation for user_id=u-2001, code=482951",
+                    "[INFO] Server time: 2026-04-11T10:30:45Z, TOTP step: 54348681",
+                    "[WARN] Code '482951' valid for step 54348680 (previous step) — rejected because window=0 (was window=1)",
+                    "[ERROR] TOTP validation failed: code is for adjacent time step but strict mode rejects it after security hardening PR #1042",
+                ],
+                "dom_snapshot": '<div class="mfa-form"><input type="text" class="totp-input" value="482951" /><span class="error-message">Invalid code. Please try again.</span></div>',
+                "history": [True, True, True, True, True, True, True, True, True, False],
+                "recommendation": "fix_code",
+                "evidence_keywords": ["TOTP", "time window", "validation", "security hardening", "too strict", "regression"],
+            },
+            {
+                "test_id": "test_password_reset_email",
+                "name": "Password reset sends email with valid reset token link",
+                "category": "genuine_bug",
+                "error_output": (
+                    "Error: Email send failed — SMTP rejected message: 550 5.1.1 Sender address rejected\n"
+                    "  From address 'noreply@old-domain.com' is no longer valid after domain migration\n"
+                    "  at test/e2e/password-reset.spec.js:37"
+                ),
+                "stack_trace": (
+                    "SMTPError: 550 5.1.1 Sender address rejected: noreply@old-domain.com\n"
+                    "    at SMTPTransport.send (src/email/transport.js:42:11)\n"
+                    "    at sendResetEmail (src/auth/passwordReset.js:28:5)\n"
+                    "    at test/e2e/password-reset.spec.js:37:22"
+                ),
+                "console_logs": [
+                    "[INFO] Password reset requested for email: alice@example.com",
+                    "[INFO] Reset token generated: tok_abc123def456 (expires in 1h)",
+                    "[ERROR] SMTP send failed: 550 Sender 'noreply@old-domain.com' rejected — domain migrated to 'noreply@newapp.io'",
+                    "[WARN] Email config still references old domain — update EMAIL_FROM in config",
+                ],
+                "dom_snapshot": '<div class="reset-form"><p>A reset link has been sent to your email.</p><div class="error-toast" style="display:block">Failed to send email. Contact support.</div></div>',
+                "history": [True, True, True, True, True, True, True, True, True, False],
+                "recommendation": "fix_code",
+                "evidence_keywords": ["password reset", "email", "from address", "sending", "configuration", "regression"],
+            },
+            {
+                "test_id": "test_oauth_callback_redirect",
+                "name": "OAuth callback redirects user to dashboard after successful authentication",
+                "category": "flaky_test",
+                "error_output": (
+                    "TimeoutError: Waiting for navigation to '/dashboard' exceeded 10000ms\n"
+                    "  OAuth provider callback took 9500ms (within timeout) but redirect was slow\n"
+                    "  at test/e2e/oauth-callback.spec.js:55"
+                ),
+                "stack_trace": (
+                    "TimeoutError: page.waitForNavigation: Timeout 10000ms exceeded\n"
+                    "    at Page.waitForNavigation (node_modules/playwright/lib/page.js:312:15)\n"
+                    "    at test/e2e/oauth-callback.spec.js:55:20"
+                ),
+                "console_logs": [
+                    "[INFO] Initiating OAuth flow with provider: Google",
+                    "[INFO] Redirected to OAuth provider authorization page",
+                    "[WARN] OAuth provider response time: 9500ms (typical: 1000-3000ms, CI occasionally slower)",
+                    "[INFO] Callback received at /auth/callback?code=auth_xyz — processing token exchange",
+                ],
+                "dom_snapshot": '<div class="auth-loading"><div class="spinner">Completing sign-in...</div><p>Redirecting to dashboard...</p></div>',
+                "history": [True, False, True, True, False, True, True, True, False, True],
+                "recommendation": "rerun",
+                "evidence_keywords": ["OAuth", "callback", "timeout", "provider", "intermittent", "slow response"],
+            },
+            {
+                "test_id": "test_ldap_login",
+                "name": "LDAP login authenticates user against corporate directory",
+                "category": "environment_issue",
+                "error_output": (
+                    "Error: LDAP bind failed — TLS handshake error\n"
+                    "  DEPTH_ZERO_SELF_SIGNED_CERT: certificate has expired\n"
+                    "  at test/e2e/ldap-login.spec.js:22"
+                ),
+                "stack_trace": (
+                    "Error: DEPTH_ZERO_SELF_SIGNED_CERT\n"
+                    "    at TLSSocket.onConnectSecure (node:tls:1530:34)\n"
+                    "    at LDAPClient.bind (src/auth/ldapClient.js:31:9)\n"
+                    "    at test/e2e/ldap-login.spec.js:22:18"
+                ),
+                "console_logs": [
+                    "[INFO] LDAP bind attempt to ldaps://ldap.staging.corp.internal:636",
+                    "[ERROR] TLS handshake failed: certificate expired on 2026-04-08 (3 days ago)",
+                    "[ERROR] Staging LDAP server certificate not renewed — ops ticket #SRE-1305 pending",
+                    "[WARN] LDAP authentication unavailable until certificate is rotated",
+                ],
+                "dom_snapshot": '<div class="login-form"><input type="text" placeholder="Corporate ID" /><input type="password" /><div class="error-banner">Corporate login unavailable. Certificate error.</div></div>',
+                "history": [True, True, True, True, True, True, True, True, True, False],
+                "recommendation": "check_infra",
+                "evidence_keywords": ["LDAP", "certificate", "expired", "staging", "TLS", "infrastructure"],
+            },
+            {
+                "test_id": "test_session_cookie_format",
+                "name": "Session cookie is set with correct format and security attributes",
+                "category": "stale_test",
+                "error_output": (
+                    "AssertionError: Expected cookie 'session' to have format 'sid=<value>' but got 'session=<jwt>; HttpOnly; SameSite=Strict'\n"
+                    "  Cookie format changed during httpOnly+sameSite security migration\n"
+                    "  at test/e2e/session-cookie.spec.js:29"
+                ),
+                "stack_trace": (
+                    "Error: expect(received).toMatch(/^sid=/)\n"
+                    "    at Object.<anonymous> (test/e2e/session-cookie.spec.js:29:30)"
+                ),
+                "console_logs": [
+                    "[INFO] Session created for user_id=u-1001 after successful login",
+                    "[INFO] Cookie set: session=eyJhbGciOi...; HttpOnly; SameSite=Strict; Secure; Path=/",
+                    "[INFO] Cookie format migrated from 'sid=<uuid>' to 'session=<jwt>' with HttpOnly+SameSite (JIRA-6100)",
+                ],
+                "dom_snapshot": '<div class="session-debug"><pre>Cookie: session=eyJhbGciOiJIUzI1NiJ9...; HttpOnly; SameSite=Strict; Secure</pre></div>',
+                "history": [False, False, False, False, False, True, True, True, True, True],
+                "recommendation": "update_test",
+                "evidence_keywords": ["cookie", "format", "httpOnly", "sameSite", "migration", "stale"],
+            },
+        ],
+        "recent_changes": [
+            {
+                "commit": "k2m5n8p",
+                "author": "security.bot",
+                "message": "Harden TOTP validation: reduce time window from +-1 to +-0 steps (PR #1042)",
+                "files_changed": ["src/auth/totp.js", "src/config/security.json"],
+                "diff": (
+                    "--- a/src/auth/totp.js\n"
+                    "+++ b/src/auth/totp.js\n"
+                    "@@ -10,5 +10,5 @@\n"
+                    " function validateTOTP(secret, code) {\n"
+                    "-  return speakeasy.totp.verify({ secret, encoding: 'base32', token: code, window: 1 });\n"
+                    "+  return speakeasy.totp.verify({ secret, encoding: 'base32', token: code, window: 0 });\n"
+                    "+  // Hardened: window=0 means only current 30s step accepted (was +-1 = 90s)\n"
+                    " }\n"
+                ),
+            },
+            {
+                "commit": "q3r6s9t",
+                "author": "devops.jen",
+                "message": "Migrate email sender domain from old-domain.com to newapp.io",
+                "files_changed": ["src/config/email.json", "src/email/transport.js"],
+                "diff": (
+                    "--- a/src/config/email.json\n"
+                    "+++ b/src/config/email.json\n"
+                    "@@ -2,3 +2,3 @@\n"
+                    '-  "from": "noreply@old-domain.com",\n'
+                    '+  "from": "noreply@old-domain.com",  // BUG: should be noreply@newapp.io\n'
+                    '   "smtp_host": "smtp.newapp.io",\n'
+                    '   "smtp_port": 587\n'
+                ),
+            },
+            {
+                "commit": "v1w4x7y",
+                "author": "security.bot",
+                "message": "Migrate session cookies to JWT format with HttpOnly and SameSite (JIRA-6100)",
+                "files_changed": ["src/auth/session.js", "src/middleware/cookies.js"],
+                "diff": (
+                    "--- a/src/auth/session.js\n"
+                    "+++ b/src/auth/session.js\n"
+                    "@@ -8,6 +8,8 @@\n"
+                    " function createSession(userId) {\n"
+                    "-  const sid = uuid();\n"
+                    "-  res.cookie('sid', sid);\n"
+                    "+  const token = jwt.sign({ userId }, SECRET, { expiresIn: '24h' });\n"
+                    "+  res.cookie('session', token, {\n"
+                    "+    httpOnly: true,\n"
+                    "+    sameSite: 'Strict',\n"
+                    "+    secure: true,\n"
+                    "+  });\n"
+                    " }\n"
+                ),
+            },
+        ],
+        "source_files": {
+            "src/auth/totp.js": (
+                "const speakeasy = require('speakeasy');\n\n"
+                "function validateTOTP(secret, code) {\n"
+                "  return speakeasy.totp.verify({\n"
+                "    secret,\n"
+                "    encoding: 'base32',\n"
+                "    token: code,\n"
+                "    window: 0, // Hardened: only current 30s step (was window: 1)\n"
+                "  });\n"
+                "}\n\n"
+                "module.exports = { validateTOTP };\n"
+            ),
+            "src/auth/passwordReset.js": (
+                "const emailConfig = require('../config/email.json');\n"
+                "const { sendEmail } = require('../email/transport');\n"
+                "const crypto = require('crypto');\n\n"
+                "async function sendResetEmail(userEmail) {\n"
+                "  const token = crypto.randomBytes(32).toString('hex');\n"
+                "  const resetLink = `https://app.newapp.io/reset?token=${token}`;\n"
+                "  await sendEmail({\n"
+                "    from: emailConfig.from, // BUG: still 'noreply@old-domain.com'\n"
+                "    to: userEmail,\n"
+                "    subject: 'Password Reset',\n"
+                "    body: `Click here to reset: ${resetLink}`,\n"
+                "  });\n"
+                "  return token;\n"
+                "}\n\n"
+                "module.exports = { sendResetEmail };\n"
+            ),
+            "src/auth/session.js": (
+                "const jwt = require('jsonwebtoken');\n"
+                "const SECRET = process.env.SESSION_SECRET;\n\n"
+                "function createSession(userId, res) {\n"
+                "  const token = jwt.sign({ userId }, SECRET, { expiresIn: '24h' });\n"
+                "  res.cookie('session', token, {\n"
+                "    httpOnly: true,\n"
+                "    sameSite: 'Strict',\n"
+                "    secure: true,\n"
+                "  });\n"
+                "}\n\n"
+                "module.exports = { createSession };\n"
+            ),
+            "test/e2e/mfa-totp.spec.js": (
+                "const { test, expect } = require('@playwright/test');\n\n"
+                "test('TOTP validation accepts valid code', async ({ page }) => {\n"
+                "  await page.goto('/login/mfa');\n"
+                "  await page.fill('.totp-input', '482951');\n"
+                "  await page.click('#verify-btn');\n"
+                "  const result = await page.textContent('.mfa-status');\n"
+                "  expect(result).not.toContain('Invalid'); // line 44\n"
+                "});\n"
+            ),
+        },
+    },
 ]

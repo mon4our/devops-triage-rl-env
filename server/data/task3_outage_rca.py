@@ -150,6 +150,9 @@ SCENARIOS = [
             {"timestamp": _ts(2, 10), "service": "auth-service", "severity": "warning", "message": "Error rate above 40%"},
             {"timestamp": _ts(2, 15), "service": "api-gateway", "severity": "critical", "message": "5xx error rate above 40%"},
         ],
+        "deployment_history": [
+            {"service": "user-db", "version": "PostgreSQL 15.4", "deployed_at": "2026-04-04T12:00:00Z", "deployed_by": "dba-team", "change": "Reduced max_connections from 500 to 100 for memory optimization"},
+        ],
     },
 
     # ── Scenario 2: Bad Deployment ──
@@ -258,6 +261,9 @@ SCENARIOS = [
             {"timestamp": _ts(2, 0), "service": "api-gateway", "severity": "warning", "message": "Payment endpoint 5xx rate above 30%"},
             {"timestamp": _ts(2, 30), "service": "queue", "severity": "warning", "message": "Queue depth exceeding threshold (800/10000)"},
         ],
+        "deployment_history": [
+            {"service": "payment-service", "version": "4.2.0", "deployed_at": _ts(0, 0), "deployed_by": "ci-pipeline", "change": "New payment validation rules"},
+        ],
     },
 
     # ── Scenario 3: Certificate Expiry Cascade ──
@@ -362,6 +368,9 @@ SCENARIOS = [
             {"timestamp": _ts(1, 30), "service": "api-gateway", "severity": "warning", "message": "Auth latency above threshold (8000ms)"},
             {"timestamp": _ts(2, 0), "service": "api-gateway", "severity": "critical", "message": "5xx error rate above 60%"},
         ],
+        "deployment_history": [
+            {"service": "auth-service", "version": "2.3.0", "deployed_at": "2026-04-01T10:00:00Z", "deployed_by": "ci-pipeline", "change": "Routine dependency updates"},
+        ],
     },
 
     # ── Scenario 4: Search Index Corruption ──
@@ -463,6 +472,9 @@ SCENARIOS = [
             {"timestamp": _ts(2, 0), "service": "search-service", "severity": "critical", "message": "Index 'products_v2' RED: shards unassigned"},
             {"timestamp": _ts(2, 30), "service": "product-service", "severity": "warning", "message": "Search fallback active, latency above threshold"},
             {"timestamp": _ts(3, 0), "service": "api-gateway", "severity": "warning", "message": "Search endpoint error rate above 25%"},
+        ],
+        "deployment_history": [
+            {"service": "search-service", "version": "1.7.0", "deployed_at": _ts(0, 0), "deployed_by": "ci-pipeline", "change": "Full reindex with new analyzer settings"},
         ],
     },
 
@@ -573,6 +585,9 @@ SCENARIOS = [
             {"timestamp": _ts(1, 30), "service": "queue", "severity": "warning", "message": "Queue depth growing rapidly: 15000 messages"},
             {"timestamp": _ts(2, 0), "service": "worker", "severity": "critical", "message": "CPU at 95%, retry storm detected"},
             {"timestamp": _ts(2, 30), "service": "email-provider", "severity": "critical", "message": "Account blocked for 60 minutes"},
+        ],
+        "deployment_history": [
+            {"service": "worker", "version": "2.3.0", "deployed_at": "2026-04-04T13:00:00Z", "deployed_by": "ci-pipeline", "change": "Added retry logic for failed notifications"},
         ],
     },
 
@@ -699,6 +714,418 @@ SCENARIOS = [
             {"timestamp": _ts(1, 0), "service": "auth-service", "severity": "critical", "message": "Error rate above 50%, DB fallback overloaded"},
             {"timestamp": _ts(1, 30), "service": "user-service", "severity": "critical", "message": "Error rate above 50%"},
             {"timestamp": _ts(2, 0), "service": "api-gateway", "severity": "critical", "message": "Circuit breaker open for auth-service and user-service"},
+        ],
+        "deployment_history": [
+            {"service": "cache", "version": "Redis 7.2.2", "deployed_at": _ts(0, 0), "deployed_by": "ops-team", "change": "Maintenance patch v7.2.1 to v7.2.2"},
+        ],
+    },
+
+    # ── Scenario 7: Memory Pressure Cascade ──
+    {
+        "id": "memory_pressure_cascade",
+        "description": "Background job processing is failing and users aren't receiving notifications. The worker service appears to be crashing repeatedly. Investigate the outage.",
+        "root_cause_service": "worker",
+        "root_cause_description_keywords": ["memory", "leak", "OOM", "killed", "batch", "processing", "heap"],
+        "failure_chain": ["worker", "queue", "notification-service", "email-provider"],
+        "remediation_steps": [
+            "Restart worker service to recover from OOM state",
+            "Fix memory leak in batch report processing code",
+            "Drain backed-up queue messages",
+            "Monitor notification-service recovery and email delivery",
+        ],
+        "remediation_keywords": [
+            ["restart", "worker", "memory"],
+            ["fix", "memory", "leak"],
+            ["drain", "queue", "backlog"],
+            ["monitor", "notification", "recovery"],
+        ],
+        "service_statuses": {
+            "api-gateway": "healthy",
+            "auth-service": "healthy",
+            "user-service": "healthy",
+            "user-db": "healthy",
+            "product-service": "healthy",
+            "product-db": "healthy",
+            "search-service": "healthy",
+            "payment-service": "healthy",
+            "payment-gateway": "healthy",
+            "queue": "unhealthy",
+            "worker": "unhealthy",
+            "notification-service": "unhealthy",
+            "cache": "healthy",
+            "email-provider": "degraded",
+        },
+        "service_metrics": {
+            "worker": {"cpu": 85, "memory": 98, "latency_ms": 8000, "error_rate": 0.90, "throughput": 5, "connections": 2},
+            "queue": {"cpu": 60, "memory": 70, "latency_ms": 3000, "error_rate": 0.40, "throughput": 50, "connections": 100},
+            "notification-service": {"cpu": 35, "memory": 45, "latency_ms": 5000, "error_rate": 0.70, "throughput": 20, "connections": 8},
+            "email-provider": {"cpu": 20, "memory": 30, "latency_ms": 2000, "error_rate": 0.30, "throughput": 40, "connections": 15},
+        },
+        "service_logs": {
+            "worker": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "Worker started, processing batch report generation jobs"},
+                {"timestamp": _ts(1, 0), "level": "WARN", "message": "Heap usage 78% (1.56GB / 2GB) — increased 300MB in last 10 minutes during batch processing"},
+                {"timestamp": _ts(2, 0), "level": "WARN", "message": "Heap usage 89% (1.78GB / 2GB) — GC unable to reclaim memory, large report buffers not released"},
+                {"timestamp": _ts(3, 0), "level": "ERROR", "message": "OutOfMemoryError: Java heap space — failed to allocate 128MB for report batch. Heap: 1.95GB / 2GB"},
+                {"timestamp": _ts(3, 30), "level": "ERROR", "message": "Worker process killed by OOM killer (pid=4521, rss=2.1GB). Container restarting..."},
+                {"timestamp": _ts(4, 0), "level": "ERROR", "message": "Worker crash loop: 3 OOM kills in last 10 minutes. Queue consumer disconnected, messages backing up."},
+            ],
+            "queue": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "RabbitMQ healthy, 12 consumers connected, 0 messages queued"},
+                {"timestamp": _ts(3, 0), "level": "WARN", "message": "Consumer group 'worker' disconnected. Messages accumulating: 500 pending"},
+                {"timestamp": _ts(3, 30), "level": "WARN", "message": "Queue depth: 2500 messages pending, 0 consumers active for 'worker' group"},
+                {"timestamp": _ts(4, 0), "level": "ERROR", "message": "Queue depth critical: 8000 messages pending, memory usage rising. No active consumers."},
+            ],
+            "notification-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "Processing notification events from queue"},
+                {"timestamp": _ts(3, 0), "level": "WARN", "message": "Upstream worker stopped producing processed events. Notification pipeline stalled."},
+                {"timestamp": _ts(3, 30), "level": "ERROR", "message": "Notification delivery backlog: 1200 notifications pending, no new events from worker"},
+                {"timestamp": _ts(4, 0), "level": "ERROR", "message": "Email delivery failing: email-provider returning 429 Too Many Requests (queued batch retry storm)"},
+            ],
+            "email-provider": [
+                {"timestamp": _ts(3, 30), "level": "WARN", "message": "Rate limit approaching: 450/500 emails per minute"},
+                {"timestamp": _ts(4, 0), "level": "ERROR", "message": "Rate limit exceeded: returning 429 for all requests. Retry after 60s."},
+            ],
+        },
+        "service_configs": {
+            "worker": {**_BASE_CONFIG, "version": "2.4.0", "jvm_heap_max": "2GB", "batch_size": 1000, "consumer_group": "worker"},
+            "queue": {**_BASE_CONFIG, "version": "RabbitMQ 3.12", "max_queue_depth": 50000},
+            "notification-service": {**_BASE_CONFIG, "version": "1.5.0", "email_rate_limit": 500},
+        },
+        "traces": [
+            {
+                "trace_id": "trace-601",
+                "spans": [
+                    {"service": "queue", "operation": "publish", "duration_ms": 50, "status": "ok", "timestamp": _ts(2, 0)},
+                    {"service": "worker", "operation": "process_batch", "duration_ms": 30000, "status": "error", "error": "OutOfMemoryError during report generation", "timestamp": _ts(2, 0)},
+                ],
+            },
+            {
+                "trace_id": "trace-602",
+                "spans": [
+                    {"service": "notification-service", "operation": "send_notification", "duration_ms": 5000, "status": "error", "error": "upstream worker unavailable, event pipeline stalled", "timestamp": _ts(3, 30)},
+                    {"service": "email-provider", "operation": "send_email", "duration_ms": 100, "status": "error", "error": "429 Too Many Requests", "timestamp": _ts(3, 30)},
+                ],
+            },
+        ],
+        "alerts": [
+            {"timestamp": _ts(2, 0), "service": "worker", "severity": "warning", "message": "Memory usage above 85%"},
+            {"timestamp": _ts(3, 0), "service": "worker", "severity": "critical", "message": "OOM kill detected — worker process terminated"},
+            {"timestamp": _ts(3, 30), "service": "queue", "severity": "critical", "message": "Queue depth above 2000, no active consumers"},
+            {"timestamp": _ts(4, 0), "service": "notification-service", "severity": "critical", "message": "Notification delivery backlog exceeding threshold"},
+            {"timestamp": _ts(4, 0), "service": "email-provider", "severity": "warning", "message": "Rate limit exceeded, requests being throttled"},
+        ],
+        "deployment_history": [
+            {"service": "worker", "version": "2.4.0", "deployed_at": _ts(0, 0), "deployed_by": "ci-pipeline", "change": "Added batch processing for large report generation"},
+            {"service": "api-gateway", "version": "3.1.0", "deployed_at": "2026-04-03T10:00:00Z", "deployed_by": "ci-pipeline", "change": "Routine dependency updates"},
+        ],
+    },
+
+    # ── Scenario 8: Cache Network Partition ──
+    {
+        "id": "dns_outage",
+        "description": "Authentication and user lookups are failing intermittently. The database seems healthy but services depending on the cache layer are degraded. Investigate.",
+        "root_cause_service": "cache",
+        "root_cause_description_keywords": ["cache", "redis", "network", "partition", "unreachable", "connection refused", "failover"],
+        "failure_chain": ["cache", "auth-service", "user-service", "api-gateway"],
+        "remediation_steps": [
+            "Restart cache (Redis) and verify network connectivity",
+            "Reconnect auth-service and user-service to cache",
+            "Monitor database load during cache recovery",
+            "Add circuit breaker for cache connections to prevent cascade",
+        ],
+        "remediation_keywords": [
+            ["restart", "cache", "redis"],
+            ["reconnect", "auth-service", "cache"],
+            ["monitor", "user-service", "recovery"],
+            ["add", "circuit", "breaker", "cache"],
+        ],
+        "service_statuses": {
+            "api-gateway": "degraded",
+            "auth-service": "degraded",
+            "user-service": "degraded",
+            "user-db": "healthy",
+            "product-service": "healthy",
+            "product-db": "healthy",
+            "search-service": "healthy",
+            "payment-service": "healthy",
+            "payment-gateway": "healthy",
+            "queue": "healthy",
+            "worker": "healthy",
+            "notification-service": "healthy",
+            "cache": "unhealthy",
+            "email-provider": "healthy",
+        },
+        "service_metrics": {
+            "cache": {"cpu": 5, "memory": 10, "latency_ms": 30000, "error_rate": 1.0, "throughput": 0, "connections": 0},
+            "auth-service": {"cpu": 55, "memory": 50, "latency_ms": 4000, "error_rate": 0.45, "throughput": 60, "connections": 45},
+            "user-service": {"cpu": 50, "memory": 48, "latency_ms": 3500, "error_rate": 0.40, "throughput": 70, "connections": 40},
+            "api-gateway": {"cpu": 45, "memory": 42, "latency_ms": 4500, "error_rate": 0.35, "throughput": 90, "connections": 180},
+        },
+        "service_logs": {
+            "cache": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "Redis 7.2.3 running, 12000 keys loaded"},
+                {"timestamp": _ts(0, 30), "level": "ERROR", "message": "Network interface eth0 flapping: link down/up 3 times in 30 seconds"},
+                {"timestamp": _ts(1, 0), "level": "ERROR", "message": "All client connections dropped: ECONNRESET on all sockets. Network partition detected."},
+                {"timestamp": _ts(1, 30), "level": "ERROR", "message": "Unable to accept new connections: bind address 10.0.1.50:6379 unreachable from application subnet"},
+                {"timestamp": _ts(2, 0), "level": "ERROR", "message": "0 connected clients (was 150). Redis is running but isolated from application network."},
+            ],
+            "auth-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "Session cache connected: redis://cache.internal:6379"},
+                {"timestamp": _ts(1, 0), "level": "ERROR", "message": "Redis connection failed: ECONNREFUSED cache.internal:6379 — falling back to DB for session lookups"},
+                {"timestamp": _ts(1, 30), "level": "WARN", "message": "Cache fallback: all session lookups hitting user-db. Query latency increased 20x."},
+                {"timestamp": _ts(2, 0), "level": "ERROR", "message": "45% of auth requests timing out: DB overloaded with uncached session queries"},
+            ],
+            "user-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "User profile cache enabled, hit rate 95%"},
+                {"timestamp": _ts(1, 0), "level": "ERROR", "message": "Cache connection lost: ECONNREFUSED. All profile lookups routing to user-db."},
+                {"timestamp": _ts(1, 30), "level": "WARN", "message": "User-db query latency 3500ms (normal: 50ms). Cache miss rate 100%."},
+                {"timestamp": _ts(2, 0), "level": "ERROR", "message": "40% of user requests failing: connection timeout to user-db under load"},
+            ],
+            "api-gateway": [
+                {"timestamp": _ts(1, 0), "level": "WARN", "message": "auth-service latency spike: 4000ms (threshold: 2000ms)"},
+                {"timestamp": _ts(1, 30), "level": "WARN", "message": "user-service latency spike: 3500ms (threshold: 2000ms)"},
+                {"timestamp": _ts(2, 0), "level": "ERROR", "message": "Error rate 35%: auth-service and user-service both degraded"},
+            ],
+        },
+        "service_configs": {
+            "cache": {**_BASE_CONFIG, "version": "Redis 7.2.3", "cluster_mode": True, "nodes": 3, "network_security_group": "sg-compliance-2026"},
+            "auth-service": {**_BASE_CONFIG, "cache_ttl_seconds": 3600, "db_fallback_enabled": True},
+            "user-service": {**_BASE_CONFIG, "cache_enabled": True, "db_connection_pool_size": 50},
+        },
+        "traces": [
+            {
+                "trace_id": "trace-701",
+                "spans": [
+                    {"service": "api-gateway", "operation": "handle_request", "duration_ms": 4500, "status": "error", "timestamp": _ts(1, 30)},
+                    {"service": "auth-service", "operation": "validate_session", "duration_ms": 4000, "status": "error", "error": "cache ECONNREFUSED, DB fallback timeout", "timestamp": _ts(1, 30)},
+                    {"service": "cache", "operation": "get_session", "duration_ms": 0, "status": "error", "error": "ECONNREFUSED: network partition", "timestamp": _ts(1, 30)},
+                ],
+            },
+            {
+                "trace_id": "trace-702",
+                "spans": [
+                    {"service": "api-gateway", "operation": "handle_request", "duration_ms": 4000, "status": "error", "timestamp": _ts(2, 0)},
+                    {"service": "user-service", "operation": "get_profile", "duration_ms": 3500, "status": "error", "error": "cache unreachable, user-db connection timeout", "timestamp": _ts(2, 0)},
+                    {"service": "cache", "operation": "get_user", "duration_ms": 0, "status": "error", "error": "ECONNREFUSED", "timestamp": _ts(2, 0)},
+                ],
+            },
+        ],
+        "alerts": [
+            {"timestamp": _ts(0, 30), "service": "cache", "severity": "critical", "message": "Network interface flapping detected"},
+            {"timestamp": _ts(1, 0), "service": "cache", "severity": "critical", "message": "All client connections dropped — network partition"},
+            {"timestamp": _ts(1, 30), "service": "auth-service", "severity": "warning", "message": "Cache connection failed, using DB fallback"},
+            {"timestamp": _ts(1, 30), "service": "user-service", "severity": "warning", "message": "Cache connection failed, using DB fallback"},
+            {"timestamp": _ts(2, 0), "service": "api-gateway", "severity": "critical", "message": "Error rate above 30%, multiple upstream services degraded"},
+        ],
+        "deployment_history": [
+            {"service": "cache", "version": "Redis 7.2.3", "deployed_at": "2026-04-04T13:30:00Z", "deployed_by": "ops-team", "change": "Network security group update for compliance"},
+        ],
+    },
+
+    # ── Scenario 9: Config Change Rollout ──
+    {
+        "id": "config_change_rollout",
+        "description": "Product pages and search results are returning errors across the site. The product catalog appears broken. Investigate the cause.",
+        "root_cause_service": "product-service",
+        "root_cause_description_keywords": ["config", "connection string", "database", "wrong", "cluster", "misconfigured", "deploy"],
+        "failure_chain": ["product-service", "search-service", "api-gateway"],
+        "remediation_steps": [
+            "Rollback product-service config to previous version with correct DB connection string",
+            "Fix connection string to point to correct production database cluster",
+            "Verify search-service recovery and index consistency",
+            "Add config validation to deployment pipeline to prevent future misconfigurations",
+        ],
+        "remediation_keywords": [
+            ["rollback", "product-service", "config", "version"],
+            ["fix", "connection", "string", "database"],
+            ["verify", "search-service", "recovery"],
+            ["add", "config", "validation", "deploy"],
+        ],
+        "service_statuses": {
+            "api-gateway": "degraded",
+            "auth-service": "healthy",
+            "user-service": "healthy",
+            "user-db": "healthy",
+            "product-service": "unhealthy",
+            "product-db": "healthy",
+            "search-service": "degraded",
+            "payment-service": "healthy",
+            "payment-gateway": "healthy",
+            "queue": "healthy",
+            "worker": "healthy",
+            "notification-service": "healthy",
+            "cache": "healthy",
+            "email-provider": "healthy",
+        },
+        "service_metrics": {
+            "product-service": {"cpu": 30, "memory": 45, "latency_ms": 100, "error_rate": 0.95, "throughput": 10, "connections": 5},
+            "search-service": {"cpu": 40, "memory": 50, "latency_ms": 2000, "error_rate": 0.60, "throughput": 30, "connections": 20},
+            "api-gateway": {"cpu": 42, "memory": 40, "latency_ms": 2500, "error_rate": 0.40, "throughput": 85, "connections": 160},
+        },
+        "service_logs": {
+            "product-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "Product service v3.2.0 starting, connecting to database..."},
+                {"timestamp": _ts(0, 5), "level": "ERROR", "message": "Database connection failed: FATAL: role 'prod_user' does not exist on host prod-db-cluster-2.internal:5432"},
+                {"timestamp": _ts(0, 10), "level": "ERROR", "message": "Config mismatch: DATABASE_URL=postgres://prod_user@prod-db-cluster-2.internal:5432/products — expected cluster-1, got cluster-2"},
+                {"timestamp": _ts(0, 30), "level": "ERROR", "message": "All product queries failing: authentication failed for user 'prod_user' on wrong database cluster"},
+                {"timestamp": _ts(1, 0), "level": "ERROR", "message": "95% error rate: returning 500 for all /products/* endpoints. DB config rolled out in v3.2.0 points to wrong cluster."},
+                {"timestamp": _ts(1, 30), "level": "WARN", "message": "Previous version v3.1.0 had DATABASE_URL=postgres://prod_user@prod-db-cluster-1.internal:5432/products (correct)"},
+            ],
+            "search-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "Search service healthy, index size: 50000 documents"},
+                {"timestamp": _ts(0, 30), "level": "WARN", "message": "Product data source returning errors. Cannot refresh search index."},
+                {"timestamp": _ts(1, 0), "level": "ERROR", "message": "60% of search queries returning partial or empty results: product-service dependency unavailable"},
+                {"timestamp": _ts(1, 30), "level": "ERROR", "message": "Search index going stale: last successful product sync was 15 minutes ago"},
+            ],
+            "api-gateway": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "Routing requests normally"},
+                {"timestamp": _ts(0, 30), "level": "ERROR", "message": "product-service returning 500 on all requests"},
+                {"timestamp": _ts(1, 0), "level": "WARN", "message": "search-service returning partial results due to product-service dependency failure"},
+                {"timestamp": _ts(1, 30), "level": "ERROR", "message": "Product and search endpoints error rate 40%. User and auth routes unaffected."},
+            ],
+        },
+        "service_configs": {
+            "product-service": {**_BASE_CONFIG, "version": "3.2.0", "database_url": "postgres://prod_user@prod-db-cluster-2.internal:5432/products", "previous_version": "3.1.0"},
+            "search-service": {**_BASE_CONFIG, "version": "1.8.0", "product_data_source": "product-service", "index_refresh_interval_s": 60},
+        },
+        "traces": [
+            {
+                "trace_id": "trace-801",
+                "spans": [
+                    {"service": "api-gateway", "operation": "handle_request", "duration_ms": 150, "status": "error", "timestamp": _ts(0, 30)},
+                    {"service": "product-service", "operation": "get_product", "duration_ms": 100, "status": "error", "error": "DB auth failed: role 'prod_user' does not exist on cluster-2", "timestamp": _ts(0, 30)},
+                ],
+            },
+            {
+                "trace_id": "trace-802",
+                "spans": [
+                    {"service": "api-gateway", "operation": "handle_request", "duration_ms": 2200, "status": "error", "timestamp": _ts(1, 0)},
+                    {"service": "search-service", "operation": "search_products", "duration_ms": 2000, "status": "error", "error": "partial results: product-service returning 500", "timestamp": _ts(1, 0)},
+                    {"service": "product-service", "operation": "get_products_batch", "duration_ms": 50, "status": "error", "error": "connection refused: wrong DB cluster", "timestamp": _ts(1, 0)},
+                ],
+            },
+        ],
+        "alerts": [
+            {"timestamp": _ts(0, 5), "service": "product-service", "severity": "critical", "message": "Database connection failed — authentication error"},
+            {"timestamp": _ts(0, 30), "service": "product-service", "severity": "critical", "message": "Error rate above 90%"},
+            {"timestamp": _ts(1, 0), "service": "search-service", "severity": "warning", "message": "Product data source unavailable, search results degraded"},
+            {"timestamp": _ts(1, 30), "service": "api-gateway", "severity": "warning", "message": "Product and search endpoint error rate above 30%"},
+        ],
+        "deployment_history": [
+            {"service": "product-service", "version": "3.2.0", "deployed_at": _ts(0, 0), "deployed_by": "dev-team", "change": "Updated database connection config for new prod cluster"},
+            {"service": "search-service", "version": "1.8.0", "deployed_at": "2026-04-02T14:00:00Z", "deployed_by": "ci-pipeline", "change": "Index optimization"},
+        ],
+    },
+
+    # ── Scenario 10: Queue Backlog ──
+    {
+        "id": "queue_backlog",
+        "description": "Payments are timing out, background jobs aren't completing, and users aren't receiving order confirmations. Investigate the outage.",
+        "root_cause_service": "queue",
+        "root_cause_description_keywords": ["queue", "storage", "disk", "full", "backlog", "messages", "consumer", "exactly_once"],
+        "failure_chain": ["queue", "payment-service", "worker", "notification-service"],
+        "remediation_steps": [
+            "Increase queue storage / clear disk space on queue broker",
+            "Purge dead-letter queue messages that can't be processed",
+            "Restart worker consumers and re-enable auto-commit",
+            "Add queue depth monitoring and disk space alerts",
+        ],
+        "remediation_keywords": [
+            ["increase", "queue", "storage", "disk"],
+            ["purge", "dead", "letter", "messages"],
+            ["restart", "worker", "consumers"],
+            ["add", "queue", "monitoring", "alerts"],
+        ],
+        "service_statuses": {
+            "api-gateway": "healthy",
+            "auth-service": "healthy",
+            "user-service": "healthy",
+            "user-db": "healthy",
+            "product-service": "healthy",
+            "product-db": "healthy",
+            "search-service": "healthy",
+            "payment-service": "degraded",
+            "payment-gateway": "healthy",
+            "queue": "unhealthy",
+            "worker": "unhealthy",
+            "notification-service": "degraded",
+            "cache": "healthy",
+            "email-provider": "healthy",
+        },
+        "service_metrics": {
+            "queue": {"cpu": 90, "memory": 95, "latency_ms": 15000, "error_rate": 0.80, "throughput": 5, "connections": 500},
+            "payment-service": {"cpu": 45, "memory": 50, "latency_ms": 12000, "error_rate": 0.55, "throughput": 25, "connections": 30},
+            "worker": {"cpu": 15, "memory": 20, "latency_ms": 500, "error_rate": 0.85, "throughput": 2, "connections": 1},
+            "notification-service": {"cpu": 30, "memory": 35, "latency_ms": 8000, "error_rate": 0.50, "throughput": 15, "connections": 10},
+        },
+        "service_logs": {
+            "queue": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "RabbitMQ 3.12 running, disk usage 85% (17GB / 20GB)"},
+                {"timestamp": _ts(1, 0), "level": "WARN", "message": "Disk usage 92% (18.4GB / 20GB). Messages not being consumed — consumers acking very slowly."},
+                {"timestamp": _ts(2, 0), "level": "ERROR", "message": "Disk usage 99% (19.8GB / 20GB). Blocking all new publishes — disk alarm triggered."},
+                {"timestamp": _ts(2, 30), "level": "ERROR", "message": "Publisher blocked: payment-service cannot publish payment events. Disk space exhausted."},
+                {"timestamp": _ts(3, 0), "level": "ERROR", "message": "Dead letter queue contains 15000 unprocessable messages (consumers disabled auto-commit, messages redelivered indefinitely)"},
+                {"timestamp": _ts(3, 30), "level": "ERROR", "message": "Queue broker in resource alarm state. No publishes accepted. 50000 messages pending delivery."},
+            ],
+            "payment-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "Payment processed: order_id=7001, publishing confirmation event to queue"},
+                {"timestamp": _ts(2, 0), "level": "ERROR", "message": "Cannot publish payment confirmation to queue: channel blocked by broker resource alarm"},
+                {"timestamp": _ts(2, 30), "level": "ERROR", "message": "Payment confirmation timeout: queue unresponsive for 12s. Payment succeeded but confirmation not delivered."},
+                {"timestamp": _ts(3, 0), "level": "ERROR", "message": "55% of payment flows failing at confirmation step: queue rejecting all publishes"},
+            ],
+            "worker": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "Worker consumer started with auto_ack=false (exactly-once processing mode)"},
+                {"timestamp": _ts(0, 30), "level": "WARN", "message": "Processing message took 30s (expected <5s). Manual ack delayed."},
+                {"timestamp": _ts(1, 0), "level": "WARN", "message": "Messages being redelivered: 500 messages in unacked state. Slow ack causing redelivery loop."},
+                {"timestamp": _ts(2, 0), "level": "ERROR", "message": "Consumer connection dropped by broker — too many unacked messages (limit: 100, current: 500)"},
+                {"timestamp": _ts(3, 0), "level": "ERROR", "message": "Cannot reconnect to queue: broker in resource alarm, rejecting new consumer connections"},
+            ],
+            "notification-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "message": "Notification consumer listening on queue 'order.notifications'"},
+                {"timestamp": _ts(2, 0), "level": "WARN", "message": "No new messages received in 2 minutes — queue appears blocked"},
+                {"timestamp": _ts(3, 0), "level": "ERROR", "message": "Order confirmation notifications stalled: queue broker not delivering messages"},
+                {"timestamp": _ts(3, 30), "level": "ERROR", "message": "1500 order confirmations not sent. Customers not receiving order emails."},
+            ],
+        },
+        "service_configs": {
+            "queue": {**_BASE_CONFIG, "version": "RabbitMQ 3.12", "disk_limit": "20GB", "max_queue_depth": 100000, "disk_free_alarm_threshold": "1GB"},
+            "worker": {**_BASE_CONFIG, "version": "2.3.5", "auto_ack": False, "prefetch_count": 100, "consumer_mode": "exactly_once"},
+            "payment-service": {**_BASE_CONFIG, "version": "4.1.0", "event_publish_timeout_ms": 10000},
+        },
+        "traces": [
+            {
+                "trace_id": "trace-901",
+                "spans": [
+                    {"service": "payment-service", "operation": "process_payment", "duration_ms": 12000, "status": "error", "timestamp": _ts(2, 30)},
+                    {"service": "payment-gateway", "operation": "charge", "duration_ms": 500, "status": "ok", "timestamp": _ts(2, 30)},
+                    {"service": "queue", "operation": "publish", "duration_ms": 11000, "status": "error", "error": "channel blocked: broker resource alarm (disk)", "timestamp": _ts(2, 30)},
+                ],
+            },
+            {
+                "trace_id": "trace-902",
+                "spans": [
+                    {"service": "worker", "operation": "consume_message", "duration_ms": 30000, "status": "error", "error": "message redelivered 5 times, unacked", "timestamp": _ts(1, 0)},
+                    {"service": "queue", "operation": "redeliver", "duration_ms": 0, "status": "ok", "error": "redelivery count: 5, auto_ack=false", "timestamp": _ts(1, 0)},
+                ],
+            },
+            {
+                "trace_id": "trace-903",
+                "spans": [
+                    {"service": "api-gateway", "operation": "handle_request", "duration_ms": 50, "status": "ok", "timestamp": _ts(2, 0)},
+                    {"service": "product-service", "operation": "get_product", "duration_ms": 30, "status": "ok", "timestamp": _ts(2, 0)},
+                ],
+            },
+        ],
+        "alerts": [
+            {"timestamp": _ts(1, 0), "service": "queue", "severity": "warning", "message": "Disk usage above 90%"},
+            {"timestamp": _ts(2, 0), "service": "queue", "severity": "critical", "message": "Disk alarm triggered — all publishers blocked"},
+            {"timestamp": _ts(2, 30), "service": "payment-service", "severity": "critical", "message": "Payment confirmation timeout rate above 50%"},
+            {"timestamp": _ts(2, 30), "service": "worker", "severity": "critical", "message": "Consumer connection dropped, cannot reconnect"},
+            {"timestamp": _ts(3, 0), "service": "notification-service", "severity": "warning", "message": "Notification delivery stalled — no new events"},
+        ],
+        "deployment_history": [
+            {"service": "worker", "version": "2.3.5", "deployed_at": "2026-04-03T16:00:00Z", "deployed_by": "ci-pipeline", "change": "Disabled consumer auto-commit for exactly-once processing"},
         ],
     },
 ]
