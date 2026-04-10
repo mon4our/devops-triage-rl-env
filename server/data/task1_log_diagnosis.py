@@ -415,4 +415,99 @@ SCENARIOS = [
         "relevant_services": ["payment-service", "api-gateway", "payment-gateway"],
         "relevant_search_terms": ["timeout", "ETIMEDOUT", "firewall", "packet loss", "504", "socket", "payment"],
     },
+    # ── Scenario 9: Database Deadlock ──
+    {
+        "id": "database_deadlock",
+        "description": "Several API requests are intermittently failing with 500 errors. Some requests succeed while others timeout. Investigate the logs to diagnose the issue.",
+        "services": {
+            "order-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "service": "order-service", "message": "Processing order: order_id=3001, user_id=456"},
+                {"timestamp": _ts(0, 15), "level": "INFO", "service": "order-service", "message": "Acquiring lock on inventory table for SKU-101"},
+                {"timestamp": _ts(0, 30), "level": "WARN", "service": "order-service", "message": "Transaction waiting for lock on orders table held by pid=2847 for 8500ms"},
+                {"timestamp": _ts(1, 0), "level": "ERROR", "service": "order-service", "message": "DEADLOCK DETECTED: transaction 5501 waiting for ShareLock on orders row while transaction 5502 holds ExclusiveLock; transaction 5502 waiting for ShareLock on inventory row while transaction 5501 holds ExclusiveLock"},
+                {"timestamp": _ts(1, 15), "level": "ERROR", "service": "order-service", "message": "Transaction 5501 aborted due to deadlock: UPDATE orders SET status='processing' WHERE id=3001; UPDATE inventory SET quantity=quantity-1 WHERE sku='SKU-101'"},
+                {"timestamp": _ts(1, 30), "level": "ERROR", "service": "order-service", "message": "Deadlock frequency: 15 deadlocks in last 5 minutes (threshold: 2). Lock ordering violation between orders and inventory tables."},
+                {"timestamp": _ts(2, 0), "level": "ERROR", "service": "order-service", "message": "Returning 500: order processing failed due to persistent deadlock on concurrent inventory+order updates"},
+                {"timestamp": _ts(2, 30), "level": "WARN", "service": "order-service", "message": "pg_stat_activity shows 12 transactions in 'idle in transaction' state, 8 waiting on locks"},
+            ],
+            "inventory-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "service": "inventory-service", "message": "Stock check: SKU-101 available=50"},
+                {"timestamp": _ts(0, 20), "level": "INFO", "service": "inventory-service", "message": "Reserving inventory: SKU-101 qty=1 for order_id=3002"},
+                {"timestamp": _ts(0, 40), "level": "WARN", "service": "inventory-service", "message": "Lock wait timeout: UPDATE inventory SET reserved=reserved+1 WHERE sku='SKU-101' — blocked by concurrent transaction"},
+                {"timestamp": _ts(1, 0), "level": "ERROR", "service": "inventory-service", "message": "DEADLOCK: transaction 5502 aborted — was holding lock on inventory while waiting for orders table lock"},
+                {"timestamp": _ts(1, 20), "level": "ERROR", "service": "inventory-service", "message": "5 failed inventory reservations in last 2 minutes due to deadlock with order-service"},
+                {"timestamp": _ts(2, 0), "level": "ERROR", "service": "inventory-service", "message": "Deadlock root cause: order-service locks orders→inventory, inventory-service locks inventory→orders — inconsistent lock ordering"},
+            ],
+            "api-gateway": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "service": "api-gateway", "message": "Request received: POST /api/orders"},
+                {"timestamp": _ts(1, 0), "level": "WARN", "service": "api-gateway", "message": "Upstream order-service latency spike: 9000ms (threshold: 2000ms)"},
+                {"timestamp": _ts(1, 30), "level": "ERROR", "service": "api-gateway", "message": "order-service returning 500 Internal Server Error on 40% of requests"},
+                {"timestamp": _ts(2, 0), "level": "INFO", "service": "api-gateway", "message": "Non-order routes (users, products, search) operating normally"},
+            ],
+            "user-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "service": "user-service", "message": "User lookup completed in 12ms"},
+                {"timestamp": _ts(1, 0), "level": "INFO", "service": "user-service", "message": "Session validation: user_id=456 OK"},
+                {"timestamp": _ts(2, 0), "level": "INFO", "service": "user-service", "message": "Profile update completed for user_id=789"},
+            ],
+            "product-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "service": "product-service", "message": "Product search completed in 35ms"},
+                {"timestamp": _ts(1, 0), "level": "INFO", "service": "product-service", "message": "Cache hit rate: 94%, all queries normal"},
+            ],
+        },
+        "ground_truth": {
+            "incident_type": "database_deadlock",
+            "severity": "P2",
+            "affected_services": ["order-service", "inventory-service", "api-gateway"],
+            "root_cause_keywords": ["deadlock", "lock", "ordering", "transaction", "inventory", "orders"],
+        },
+        "relevant_services": ["order-service", "inventory-service"],
+        "relevant_search_terms": ["deadlock", "lock", "transaction", "aborted", "waiting", "ShareLock"],
+    },
+    # ── Scenario 10: Cache Poisoning / Stale Data ──
+    {
+        "id": "cache_poisoning",
+        "description": "Users are reporting seeing incorrect data — wrong prices, someone else's profile info, or outdated inventory counts. The errors are inconsistent and don't happen on every request. Investigate.",
+        "services": {
+            "product-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "service": "product-service", "message": "Cache hit for product_id=501: price=$29.99"},
+                {"timestamp": _ts(0, 30), "level": "INFO", "service": "product-service", "message": "Price update received from admin: product_id=501 new_price=$24.99"},
+                {"timestamp": _ts(0, 35), "level": "WARN", "service": "product-service", "message": "Cache invalidation FAILED for product_id=501: Redis EVAL script returned nil (key pattern mismatch after schema migration)"},
+                {"timestamp": _ts(1, 0), "level": "INFO", "service": "product-service", "message": "Cache hit for product_id=501: price=$29.99 (STALE — DB has $24.99)"},
+                {"timestamp": _ts(1, 30), "level": "WARN", "service": "product-service", "message": "Cache key format changed in v2.5.0 (product:{id} → prod:v2:{id}) but invalidation still targets old format"},
+                {"timestamp": _ts(2, 0), "level": "ERROR", "service": "product-service", "message": "Stale cache detected: 23 products returning outdated prices. Cache invalidation broken since deploy of v2.5.0"},
+                {"timestamp": _ts(2, 30), "level": "ERROR", "service": "product-service", "message": "Customer complaint: product_id=501 shows $29.99 in cart but DB price is $24.99. Cache TTL=3600s, 45 minutes remaining on stale entry"},
+            ],
+            "cache-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "service": "cache-service", "message": "Redis 7.0.12 healthy, 15000 keys, memory usage 340MB/2GB"},
+                {"timestamp": _ts(0, 35), "level": "WARN", "service": "cache-service", "message": "DEL command for key pattern 'product:*' matched 0 keys (expected >0)"},
+                {"timestamp": _ts(1, 0), "level": "INFO", "service": "cache-service", "message": "GET prod:v2:501 hit — returning cached value (written 45min ago)"},
+                {"timestamp": _ts(1, 30), "level": "WARN", "service": "cache-service", "message": "Key namespace audit: 8500 keys match 'prod:v2:*', 0 keys match 'product:*' — old format keys already expired"},
+                {"timestamp": _ts(2, 0), "level": "INFO", "service": "cache-service", "message": "No invalidation requests received for 'prod:v2:*' pattern in last 60 minutes"},
+            ],
+            "user-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "service": "user-service", "message": "User profile served from cache: user_id=123"},
+                {"timestamp": _ts(1, 0), "level": "INFO", "service": "user-service", "message": "Profile update: user_id=123 email changed"},
+                {"timestamp": _ts(1, 5), "level": "INFO", "service": "user-service", "message": "Cache invalidated for user_id=123 (user:123 key deleted)"},
+                {"timestamp": _ts(2, 0), "level": "INFO", "service": "user-service", "message": "User profile cache operating normally, invalidation working"},
+            ],
+            "api-gateway": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "service": "api-gateway", "message": "Request received: GET /api/products/501"},
+                {"timestamp": _ts(1, 0), "level": "INFO", "service": "api-gateway", "message": "All upstream services healthy, no error rate increase detected"},
+                {"timestamp": _ts(2, 0), "level": "WARN", "service": "api-gateway", "message": "3 customer reports of incorrect pricing but no service errors — possible data consistency issue"},
+            ],
+            "payment-service": [
+                {"timestamp": _ts(0, 0), "level": "INFO", "service": "payment-service", "message": "Payment processed: order_id=4001 amount=$29.99 status=success"},
+                {"timestamp": _ts(1, 0), "level": "INFO", "service": "payment-service", "message": "Payment processed: order_id=4002 amount=$59.99 status=success"},
+                {"timestamp": _ts(2, 0), "level": "INFO", "service": "payment-service", "message": "All payments processing normally"},
+            ],
+        },
+        "ground_truth": {
+            "incident_type": "cache_poisoning",
+            "severity": "P3",
+            "affected_services": ["product-service", "cache-service"],
+            "root_cause_keywords": ["cache", "stale", "invalidation", "key format", "schema migration", "TTL", "poisoning"],
+        },
+        "relevant_services": ["product-service", "cache-service"],
+        "relevant_search_terms": ["cache", "stale", "invalidation", "FAILED", "key", "mismatch", "format"],
+    },
 ]

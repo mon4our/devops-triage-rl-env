@@ -16,20 +16,15 @@ except ImportError:
 
 from fastmcp import FastMCP
 
+from models import DevOpsState
 from .data.task1_log_diagnosis import SCENARIOS as TASK1_SCENARIOS
 from .data.task2_test_triage import SCENARIOS as TASK2_SCENARIOS
 from .data.task3_outage_rca import SCENARIOS as TASK3_SCENARIOS, SERVICE_TOPOLOGY
 from .rewards import grade_log_diagnosis, grade_test_triage, grade_outage_rca
 
 
-class DevOpsState(State):
-    """Pydantic state for the DevOps Triage environment."""
-    task: str = ""
-    scenario_id: str = ""
-    accumulated_reward: float = 0.0
-
-
 TASK_NAMES = {"log_diagnosis", "test_triage", "outage_rca"}
+TASK_MAX_STEPS = {"log_diagnosis": 25, "test_triage": 35, "outage_rca": 40}
 
 
 class DevOpsEnvironment(MCPEnvironment):
@@ -93,6 +88,90 @@ class DevOpsEnvironment(MCPEnvironment):
                     if keyword.lower() in entry["message"].lower():
                         results.append({**entry, "service": service_name})
             return results[:30]
+
+        @mcp.tool
+        def get_runbook(incident_type: str) -> dict:
+            """Look up the operations runbook for a given incident type. Returns diagnostic steps and remediation procedures."""
+            runbooks = {
+                "memory_leak": {
+                    "title": "Memory Leak Runbook",
+                    "diagnostic_steps": [
+                        "Check heap usage trends with get_logs(service, level='WARN')",
+                        "Look for OOM or OutOfMemoryError in logs",
+                        "Identify which service has growing memory over time",
+                        "Check for large cache sizes or unclosed resources",
+                    ],
+                    "remediation": ["Restart affected service", "Increase memory limits", "Deploy fix for leak source"],
+                },
+                "database_connection_pool": {
+                    "title": "DB Connection Pool Exhaustion Runbook",
+                    "diagnostic_steps": [
+                        "Check connection pool stats in service logs",
+                        "Identify services sharing the database",
+                        "Look for slow queries holding connections open",
+                    ],
+                    "remediation": ["Increase pool size", "Fix slow queries", "Add connection pooler (PgBouncer)"],
+                },
+                "certificate_expiration": {
+                    "title": "TLS Certificate Expiration Runbook",
+                    "diagnostic_steps": [
+                        "Check certificate expiry dates in logs",
+                        "Identify affected endpoints and services",
+                        "Verify auto-renewal configuration",
+                    ],
+                    "remediation": ["Renew certificate immediately", "Fix auto-renewal process", "Restart affected services"],
+                },
+                "rate_limiting": {
+                    "title": "Rate Limiting Runbook",
+                    "diagnostic_steps": [
+                        "Check for 429 Too Many Requests in gateway logs",
+                        "Identify source of excessive traffic",
+                        "Review rate limit configuration",
+                    ],
+                    "remediation": ["Block abusive IPs/clients", "Adjust rate limits if legitimate", "Add caching layer"],
+                },
+                "disk_space": {
+                    "title": "Disk Space Exhaustion Runbook",
+                    "diagnostic_steps": [
+                        "Check for ENOSPC errors in logs",
+                        "Identify which service or volume is full",
+                        "Check log retention and rotation policies",
+                    ],
+                    "remediation": ["Clear old logs or temp files", "Increase volume size", "Fix log rotation"],
+                },
+                "dns": {
+                    "title": "DNS Resolution Failure Runbook",
+                    "diagnostic_steps": [
+                        "Check for ENOTFOUND or SERVFAIL errors in logs",
+                        "Test DNS resolution from affected service",
+                        "Check DNS resolver health",
+                    ],
+                    "remediation": ["Restart DNS resolver", "Flush DNS cache", "Switch to backup DNS"],
+                },
+                "deadlock": {
+                    "title": "Database Deadlock Runbook",
+                    "diagnostic_steps": [
+                        "Check for deadlock detection messages in database logs",
+                        "Identify conflicting transactions and tables",
+                        "Review query patterns and lock ordering",
+                    ],
+                    "remediation": ["Kill blocking transactions", "Fix lock ordering in application code", "Add retry logic for deadlocks"],
+                },
+                "cache_poisoning": {
+                    "title": "Cache Poisoning Runbook",
+                    "diagnostic_steps": [
+                        "Compare cached values against source of truth",
+                        "Check cache invalidation events and TTLs",
+                        "Identify when stale data was written",
+                    ],
+                    "remediation": ["Flush affected cache keys", "Fix cache invalidation logic", "Add cache validation checks"],
+                },
+            }
+            key = incident_type.lower().replace(" ", "_").replace("-", "_")
+            for rk, rv in runbooks.items():
+                if key in rk or rk in key:
+                    return rv
+            return {"info": f"No runbook found for '{incident_type}'. Available types: {list(runbooks.keys())}"}
 
         @mcp.tool
         def submit_diagnosis(incident_type: str, severity: str, affected_services: str, root_cause: str) -> dict:
@@ -166,6 +245,20 @@ class DevOpsEnvironment(MCPEnvironment):
         def get_recent_changes() -> list[dict]:
             """Get recent git commits with diffs that may have caused test failures."""
             return env._scenario.get("recent_changes", [])
+
+        @mcp.tool
+        def get_ci_config() -> dict:
+            """Get the CI/CD pipeline configuration: test runner, environment, timeout settings, retry policy."""
+            return env._scenario.get("ci_config", {
+                "runner": "GitHub Actions",
+                "test_framework": "Playwright",
+                "timeout_ms": 30000,
+                "retries": 0,
+                "parallel": True,
+                "environment": "staging",
+                "node_version": "18.x",
+                "browser": "chromium",
+            })
 
         @mcp.tool
         def submit_classification(test_id: str, category: str, evidence: str, recommendation: str) -> dict:
@@ -258,6 +351,16 @@ class DevOpsEnvironment(MCPEnvironment):
             return {"alerts": alerts, "available_trace_ids": trace_ids}
 
         @mcp.tool
+        def get_deployment_history(service: str = "") -> list[dict]:
+            """Get recent deployment history. Optionally filter by service name."""
+            deployments = env._scenario.get("deployment_history", [])
+            if service:
+                deployments = [d for d in deployments if d.get("service") == service]
+            if not deployments:
+                return [{"info": "No recent deployments found" + (f" for '{service}'" if service else "")}]
+            return deployments
+
+        @mcp.tool
         def submit_report(root_cause_service: str, root_cause_description: str, failure_chain: str, remediation_steps: str) -> dict:
             """Submit incident report.
             - root_cause_service: the service where the root cause originated
@@ -328,15 +431,18 @@ class DevOpsEnvironment(MCPEnvironment):
                     self._source_files_viewed.add(fp)
                     if fp in self._scenario.get("source_files", {}):
                         reward += 0.02
+            elif tool_name == "get_recent_changes":
+                if "__recent_changes_viewed__" not in self._source_files_viewed:
+                    self._source_files_viewed.add("__recent_changes_viewed__")
+                    reward += 0.03
 
         elif self._current_task == "outage_rca":
             step_threshold = 25
             statuses = self._scenario.get("service_statuses", {})
             if tool_name == "get_service_status":
-                for svc, status in statuses.items():
-                    if status != "healthy" and svc not in self._rca_services_checked:
-                        self._rca_services_checked.add(svc)
-                        reward += 0.02
+                if "__status_checked__" not in self._rca_services_checked:
+                    self._rca_services_checked.add("__status_checked__")
+                    reward += 0.03
             elif tool_name == "get_service_metrics":
                 svc = tool_args.get("service", "")
                 key = f"{svc}:{tool_args.get('metric', '')}"
@@ -358,6 +464,10 @@ class DevOpsEnvironment(MCPEnvironment):
                         reward += 0.04
                     elif statuses.get(svc) != "healthy":
                         reward += 0.01
+            elif tool_name == "get_dependency_graph":
+                if "__dep_graph_viewed__" not in self._rca_services_checked:
+                    self._rca_services_checked.add("__dep_graph_viewed__")
+                    reward += 0.03
         else:
             step_threshold = 20
 
@@ -426,12 +536,12 @@ class DevOpsEnvironment(MCPEnvironment):
         # Build initial observation message
         description = self._scenario.get("description", "Investigate the incident.")
         if task == "log_diagnosis":
-            tools_hint = "Tools: get_services(), get_logs(service, level, limit), search_logs(keyword), submit_diagnosis(incident_type, severity, affected_services, root_cause)"
+            tools_hint = "Tools: get_services(), get_logs(service, level, limit), search_logs(keyword), get_runbook(incident_type), submit_diagnosis(incident_type, severity, affected_services, root_cause)"
         elif task == "test_triage":
-            tools_hint = "Tools: get_test_summary(), get_test_details(test_id), get_test_history(test_id, num_runs), get_source_code(file_path), get_recent_changes(), submit_classification(test_id, category, evidence, recommendation)"
+            tools_hint = "Tools: get_test_summary(), get_test_details(test_id), get_test_history(test_id, num_runs), get_source_code(file_path), get_recent_changes(), get_ci_config(), submit_classification(test_id, category, evidence, recommendation)"
             description = self._scenario.get("app_description", description)
         else:
-            tools_hint = "Tools: get_service_status(), get_service_metrics(service, metric), get_service_logs(service, level, limit), get_service_config(service), get_dependency_graph(), trace_request(trace_id), get_alert_history(), submit_report(root_cause_service, root_cause_description, failure_chain, remediation_steps)"
+            tools_hint = "Tools: get_service_status(), get_service_metrics(service, metric), get_service_logs(service, level, limit), get_service_config(service), get_dependency_graph(), trace_request(trace_id), get_alert_history(), get_deployment_history(service), submit_report(root_cause_service, root_cause_description, failure_chain, remediation_steps)"
 
         return Observation(
             done=False,
@@ -458,31 +568,31 @@ class DevOpsEnvironment(MCPEnvironment):
             },
         )
 
-    def step(
-        self,
-        action: Action,
-        timeout_s: Optional[float] = None,
-        **kwargs: Any,
-    ) -> Observation:
-        self._state.step_count += 1
+    # ── Shared step helpers ──
 
-        # Extract tool info before calling parent
+    def _extract_tool_info(self, action: Action) -> tuple[str, dict]:
+        """Extract tool name and arguments from an action."""
         tool_name = ""
-        tool_args = {}
+        tool_args: dict = {}
         if hasattr(action, "tool_name") and action.tool_name:
             tool_name = action.tool_name
         if hasattr(action, "arguments") and action.arguments:
             tool_args = action.arguments if isinstance(action.arguments, dict) else {}
+        return tool_name, tool_args
 
-        # Let MCPEnvironment handle the tool execution
-        obs = super().step(action, timeout_s=timeout_s, **kwargs)
-
-        # Compute incremental reward
+    def _process_step_result(
+        self, tool_name: str, tool_args: dict, obs: Observation,
+    ) -> Observation:
+        """Apply reward logic, max-step enforcement, and done state."""
         step_reward = self._compute_step_reward(tool_name, tool_args)
 
-        # If a submission tool was called, add final score
         if self._done:
             step_reward += self._final_score
+
+        # Max-step enforcement
+        max_steps = TASK_MAX_STEPS.get(self._current_task, 30)
+        if not self._done and self._state.step_count >= max_steps:
+            self._done = True
 
         self._accumulated_reward += step_reward
         self._state.accumulated_reward = round(self._accumulated_reward, 4)
@@ -492,6 +602,17 @@ class DevOpsEnvironment(MCPEnvironment):
         obs.done = self._done
         obs.reward = round(step_reward, 4)
         return obs
+
+    def step(
+        self,
+        action: Action,
+        timeout_s: Optional[float] = None,
+        **kwargs: Any,
+    ) -> Observation:
+        self._state.step_count += 1
+        tool_name, tool_args = self._extract_tool_info(action)
+        obs = super().step(action, timeout_s=timeout_s, **kwargs)
+        return self._process_step_result(tool_name, tool_args, obs)
 
     async def step_async(
         self,
@@ -500,29 +621,9 @@ class DevOpsEnvironment(MCPEnvironment):
         **kwargs: Any,
     ) -> Observation:
         self._state.step_count += 1
-
-        tool_name = ""
-        tool_args = {}
-        if hasattr(action, "tool_name") and action.tool_name:
-            tool_name = action.tool_name
-        if hasattr(action, "arguments") and action.arguments:
-            tool_args = action.arguments if isinstance(action.arguments, dict) else {}
-
+        tool_name, tool_args = self._extract_tool_info(action)
         obs = await super().step_async(action, timeout_s=timeout_s, **kwargs)
-
-        step_reward = self._compute_step_reward(tool_name, tool_args)
-
-        if self._done:
-            step_reward += self._final_score
-
-        self._accumulated_reward += step_reward
-        self._state.accumulated_reward = round(self._accumulated_reward, 4)
-
-        # Mutate the observation in-place so serialization preserves its
-        # subclass fields (e.g. CallToolObservation.result, .tool_name)
-        obs.done = self._done
-        obs.reward = round(step_reward, 4)
-        return obs
+        return self._process_step_result(tool_name, tool_args, obs)
 
     @property
     def state(self) -> DevOpsState:

@@ -2,16 +2,27 @@
 
 from __future__ import annotations
 
+import re
+
 
 def _normalize(s: str) -> str:
     return s.lower().strip().replace("-", "_").replace(" ", "_")
 
 
 def _keyword_coverage(text: str, keywords: list[str]) -> float:
+    """Score how many keywords appear in text using word-boundary matching."""
     if not keywords:
         return 0.0
     text_lower = text.lower()
-    hits = sum(1 for kw in keywords if kw.lower() in text_lower)
+    hits = 0
+    for kw in keywords:
+        kw_lower = kw.lower()
+        # Use leading \b to prevent matching inside other words
+        # (e.g. "pool" won't match "carpool") while still allowing
+        # prefix keywords like "throttl" to match "throttling".
+        pattern = r'\b' + re.escape(kw_lower)
+        if re.search(pattern, text_lower):
+            hits += 1
     return min(hits / len(keywords), 1.0)
 
 
@@ -42,6 +53,14 @@ INCIDENT_TYPE_ALIASES = {
     "network_timeout": [
         "upstream_timeout", "api_timeout", "connection_timeout",
         "firewall_issue", "network_issue", "packet_loss",
+    ],
+    "database_deadlock": [
+        "deadlock", "lock_contention", "transaction_deadlock",
+        "lock_timeout", "deadlock_detected",
+    ],
+    "cache_poisoning": [
+        "stale_cache", "cache_corruption", "cache_invalidation_failure",
+        "incorrect_cache", "bad_cache", "cache_inconsistency",
     ],
 }
 

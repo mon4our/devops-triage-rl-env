@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-try:
-    from openenv.core.mcp_client import MCPToolClient
-except ImportError:
-    from openenv.core.mcp_client import MCPToolClient
+from openenv.core.mcp_client import MCPToolClient
 
 
 class DevOpsTriageEnv(MCPToolClient):

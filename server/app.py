@@ -4,12 +4,8 @@ from __future__ import annotations
 
 import json
 
-try:
-    from openenv.core.env_server.http_server import create_app
-    from openenv.core.env_server.mcp_types import CallToolAction, CallToolObservation
-except ImportError:
-    from openenv.core.env_server.http_server import create_app
-    from openenv.core.env_server.mcp_types import CallToolAction, CallToolObservation
+from openenv.core.env_server.http_server import create_app
+from openenv.core.env_server.mcp_types import CallToolAction, CallToolObservation
 
 from pydantic import field_validator
 

@@ -48,6 +48,7 @@ TASKS = [
             - get_services() — list all services
             - get_logs(service, level="ALL", limit=20) — get logs from a service (level: ERROR/WARN/INFO/ALL)
             - search_logs(keyword) — search all logs for a keyword
+            - get_runbook(incident_type) — look up operations runbook for an incident type
             - submit_diagnosis(incident_type, severity, affected_services, root_cause) — submit your diagnosis
               - severity: P1 (critical), P2 (major), P3 (minor), P4 (low)
               - affected_services: comma-separated service names
@@ -74,6 +75,7 @@ TASKS = [
             - get_test_history(test_id, num_runs=10) — pass/fail history
             - get_source_code(file_path) — view source code
             - get_recent_changes() — recent git commits and diffs
+            - get_ci_config() — CI/CD pipeline configuration (runner, timeouts, environment)
             - submit_classification(test_id, category, evidence, recommendation)
               - category: genuine_bug | flaky_test | environment_issue | stale_test
               - recommendation: fix_code | rerun | update_test | check_infra
@@ -102,6 +104,7 @@ TASKS = [
             - get_dependency_graph() — service dependency map
             - trace_request(trace_id) — distributed trace
             - get_alert_history() — recent alerts and available trace IDs
+            - get_deployment_history(service) — recent deployments, optionally filtered by service
             - submit_report(root_cause_service, root_cause_description, failure_chain, remediation_steps)
               - failure_chain: comma-separated service names in causal order
               - remediation_steps: newline-separated steps in priority order
@@ -214,6 +217,8 @@ async def run_task(
     rewards: list[float] = []
     steps_taken = 0
     score = 0.0
+    final_submission_reward = 0.0
+    submission_done = False
 
     log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
 
@@ -255,6 +260,10 @@ async def run_task(
                 done = result.done
                 error = None
 
+                if done and reward > 0:
+                    submission_done = True
+                    final_submission_reward = reward
+
                 # Build observation text for the LLM
                 obs = result.observation
                 if isinstance(obs, dict):
@@ -291,11 +300,12 @@ async def run_task(
             if done:
                 break
 
-        # Final score is the last non-zero reward (the grading score)
-        # or accumulated positive rewards if no submission happened
-        if rewards:
-            submission_rewards = [r for r in rewards if r > 0.1]  # submission scores are > 0.1
-            score = submission_rewards[-1] if submission_rewards else max(sum(r for r in rewards if r > 0), 0)
+        # Use the submission reward directly when available; fall back to
+        # the sum of positive exploration rewards if no submission happened.
+        if submission_done:
+            score = final_submission_reward
+        elif rewards:
+            score = max(sum(r for r in rewards if r > 0), 0)
         score = min(max(score, 0.0), 1.0)
 
     except Exception as exc:
