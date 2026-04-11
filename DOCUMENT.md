@@ -13,7 +13,7 @@
 ### Why DevOps?
 
 - **Real-world tasks, not toy problems.** These are genuine daily activities, not games or synthetic puzzles.
-- **Deterministic grading.** Each task has an objectively correct answer: the root cause IS X, the test IS flaky, the failure chain IS A→B→C. This enables reproducible, deterministic scoring.
+- **Deterministic, structured grading.** Submissions are picks from closed vocabularies (enums + tag sets), not prose. Set components are F1-scored and ordered components use precision-aware LCS, so over-submitting hurts as much as under-submitting. `reset(seed, split)` honors the seed via a local RNG instance — fixed-seed runs on the test split are byte-reproducible. A held-out `test` split (3 scenarios per task) lets evaluation use scenarios the env was not authored against. Anti-gaming invariants are pinned by the adversarial suite in [`tests/test_exploits.py`](tests/test_exploits.py) — run `uv run python -m pytest tests/ -q`.
 - **Natural difficulty ladder.** Reading logs (easy) → triaging tests with multiple evidence types (medium) → multi-service RCA with dependency graphs and distributed traces (hard).
 - **Underrepresented in AI benchmarks.** Existing OpenEnv environments cover coding, finance, calendar, and games. DevOps intelligence is a novel and valuable domain.
 

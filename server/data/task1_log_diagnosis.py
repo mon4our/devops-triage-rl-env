@@ -511,3 +511,35 @@ SCENARIOS = [
         "relevant_search_terms": ["cache", "stale", "invalidation", "FAILED", "key", "mismatch", "format"],
     },
 ]
+
+
+# ── Closed-vocabulary overlay ──
+# Maps each scenario to picks from rewards.ROOT_CAUSE_TAGS so the grader can
+# F1-score structured submissions instead of free-text root_cause prose.
+
+_ROOT_CAUSE_TAGS_BY_ID: dict[str, list[str]] = {
+    "db_pool_exhaustion": ["connection_pool_exhausted", "max_connections_reached", "postgres", "pool_timeout"],
+    "memory_leak": ["memory_leak", "heap_exhausted", "oom", "gc_pressure"],
+    "cert_expiry": ["certificate_expired", "tls_handshake_failed"],
+    "rate_limiting": ["rate_limit_exceeded", "throttling", "abusive_client"],
+    "disk_full": ["disk_full", "enospc", "log_rotation_failed", "retention_misconfigured"],
+    "dns_resolution_failure": ["dns_resolution_failed", "servfail", "enotfound", "resolver_unreachable"],
+    "kafka_consumer_lag": ["consumer_lag", "consumer_rebalance", "kafka_session_timeout", "partition_skew"],
+    "upstream_api_timeout": ["network_timeout", "etimedout", "upstream_unreachable", "firewall_block"],
+    "database_deadlock": ["deadlock", "lock_contention", "postgres"],
+    "cache_poisoning": ["cache_stale", "cache_invalidation_failed", "cache_key_mismatch", "ttl_misconfigured"],
+}
+
+# Held-out test scenarios. Hackathon eval should reset(split="test", seed=...).
+_TEST_SCENARIO_IDS: set[str] = {"upstream_api_timeout", "database_deadlock", "cache_poisoning"}
+
+# Generic per-task description so the scenario can't be fingerprinted from the
+# initial observation. The original scenario-specific text moves to
+# `internal_description` (never returned to the agent).
+_PUBLIC_DESCRIPTION = "Investigate the production incident in the service cluster and submit your diagnosis."
+
+for _s in SCENARIOS:
+    _s["split"] = "test" if _s["id"] in _TEST_SCENARIO_IDS else "train"
+    _s["ground_truth"]["root_cause_tags"] = _ROOT_CAUSE_TAGS_BY_ID[_s["id"]]
+    _s["internal_description"] = _s["description"]
+    _s["description"] = _PUBLIC_DESCRIPTION

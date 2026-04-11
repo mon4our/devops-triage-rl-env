@@ -46,18 +46,22 @@ TASKS = [
 
             Available tools (use exactly these function names):
             - get_services() — list all services
-            - get_logs(service, level="ALL", limit=20) — get logs from a service (level: ERROR/WARN/INFO/ALL)
-            - search_logs(keyword) — search all logs for a keyword
-            - get_runbook(incident_type) — look up operations runbook for an incident type
-            - submit_diagnosis(incident_type, severity, affected_services, root_cause) — submit your diagnosis
-              - severity: P1 (critical), P2 (major), P3 (minor), P4 (low)
-              - affected_services: comma-separated service names
+            - get_logs(service, level="ALL", limit=20) — get logs from a service (level: ERROR/WARN/INFO/ALL, limit capped at 50)
+            - search_logs(keyword) — search all logs for a keyword (empty keywords rejected)
+            - get_runbook() — generic incident response runbook
+            - submit_diagnosis(incident_type, severity, affected_services, root_cause_tags) — submit your diagnosis
+              - incident_type: EXACTLY ONE value from the closed vocabulary in the reset observation's `vocabulary` field
+              - severity: P1 | P2 | P3 | P4
+              - affected_services: list of service names (or comma-separated string). F1-scored — do not dump every service.
+              - root_cause_tags: list of 2-5 tags from the closed ROOT_CAUSE_TAGS vocabulary shown in the reset observation. F1-scored — do not kitchen-sink.
+
+            The reset observation includes a `vocabulary` field with the full closed sets. Read it carefully and pick values from there only.
 
             Strategy:
             1. List services first
             2. Check logs of each service for errors
             3. Search for specific error patterns
-            4. Submit your diagnosis when confident
+            4. Submit your diagnosis with vocabulary-matching values
 
             Respond with a JSON tool call: {"tool": "<name>", "args": {<arguments>}}
         """),
@@ -76,15 +80,19 @@ TASKS = [
             - get_source_code(file_path) — view source code
             - get_recent_changes() — recent git commits and diffs
             - get_ci_config() — CI/CD pipeline configuration (runner, timeouts, environment)
-            - submit_classification(test_id, category, evidence, recommendation)
+            - submit_classification(test_id, category, recommendation, evidence_tags)
+              - test_id: must match a failed test id from get_test_summary()
               - category: genuine_bug | flaky_test | environment_issue | stale_test
               - recommendation: fix_code | rerun | update_test | check_infra
+              - evidence_tags: list of 1-4 tags from the closed EVIDENCE_TAGS vocabulary in the reset observation's `vocabulary` field (NOT prose). F1-scored.
+
+            You MUST call submit_classification once for EACH failed test id. Partial submissions score zero.
 
             Strategy:
             1. Get the test summary to see which tests failed
             2. For each failed test, check its details and history
             3. Look at recent code changes and source code for context
-            4. Submit a classification for EACH failed test
+            4. Submit a classification for EACH failed test (don't stop after one)
 
             Respond with a JSON tool call: {"tool": "<name>", "args": {<arguments>}}
         """),
@@ -103,18 +111,21 @@ TASKS = [
             - get_service_config(service) — service configuration
             - get_dependency_graph() — service dependency map
             - trace_request(trace_id) — distributed trace
-            - get_alert_history() — recent alerts and available trace IDs
+            - get_alert_history() — recent alerts (trace IDs are embedded in alert messages)
             - get_deployment_history(service) — recent deployments, optionally filtered by service
-            - submit_report(root_cause_service, root_cause_description, failure_chain, remediation_steps)
-              - failure_chain: comma-separated service names in causal order
-              - remediation_steps: newline-separated steps in priority order
+            - get_remediation_steps() — canonical remediation step bank for this scenario (list of {id, label}). You MUST call this before submit_report.
+            - submit_report(root_cause_service, failure_chain, remediation_step_ids)
+              - root_cause_service: service name from get_service_status() (exact match required)
+              - failure_chain: ordered list of service names in causal order. Precision-aware LCS — do not pad.
+              - remediation_step_ids: ordered list of step IDs picked from get_remediation_steps(). Do NOT invent IDs. F1 + ordering.
 
             Strategy:
             1. Check service status to find unhealthy/degraded services
-            2. Check alerts for timeline and traces
+            2. Check alerts for timeline and traces (trace IDs are embedded in alert text)
             3. Investigate metrics, logs, and configs of affected services
             4. Use dependency graph and traces to map the failure cascade
-            5. Submit your report
+            5. Call get_remediation_steps() to see the canonical step bank
+            6. Submit your report with step IDs from that bank
 
             Respond with a JSON tool call: {"tool": "<name>", "args": {<arguments>}}
         """),
@@ -260,7 +271,11 @@ async def run_task(
                 done = result.done
                 error = None
 
-                if done and reward > 0:
+                if done and reward > 0 and tool_name in {
+                    "submit_diagnosis",
+                    "submit_classification",
+                    "submit_report",
+                }:
                     submission_done = True
                     final_submission_reward = reward
 
@@ -300,12 +315,12 @@ async def run_task(
             if done:
                 break
 
-        # Use the submission reward directly when available; fall back to
-        # the sum of positive exploration rewards if no submission happened.
+        # Score is only credited when the agent actually submits via one of
+        # the submit_* tools. Exploration shaping never counts toward the score.
         if submission_done:
             score = final_submission_reward
-        elif rewards:
-            score = max(sum(r for r in rewards if r > 0), 0)
+        else:
+            score = 0.0
         score = min(max(score, 0.0), 1.0)
 
     except Exception as exc:

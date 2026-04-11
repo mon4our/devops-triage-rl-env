@@ -33,12 +33,12 @@ The agent queries production logs from a web service cluster to identify what in
 - `get_services()` — list available services
 - `get_logs(service, level, limit)` — retrieve log entries
 - `search_logs(keyword)` — search across all logs
-- `get_runbook(incident_type)` — look up operations runbook for diagnostic steps and remediation
-- `submit_diagnosis(incident_type, severity, affected_services, root_cause)` — submit answer
+- `get_runbook()` — generic incident response runbook (does NOT enumerate the incident-type vocabulary)
+- `submit_diagnosis(incident_type, severity, affected_services, root_cause_tags)` — structured submission
 
 **Observations:** Log entries with timestamp, level, service, and message fields.
 
-**Grading:** incident_type (35%), severity (20%), affected_services (25%), root_cause keywords (20%).
+**Grading:** `incident_type` enum (35%), `severity` enum (20%), `affected_services` F1 (25%), `root_cause_tags` F1 over the closed `ROOT_CAUSE_TAGS` vocabulary (20%). Kitchen-sinking the sets tanks the score because F1 is precision-aware.
 
 ### Task 2: CI/CD Test Failure Triage (Medium)
 
@@ -53,11 +53,11 @@ The agent analyzes a completed E2E test suite run and classifies each of 5 faile
 - `get_source_code(file_path)` — view app or test source code
 - `get_recent_changes()` — recent git commits and diffs
 - `get_ci_config()` — CI/CD pipeline configuration (runner, timeouts, environment)
-- `submit_classification(test_id, category, evidence, recommendation)` — classify a test
+- `submit_classification(test_id, category, recommendation, evidence_tags)` — structured classification per failed test (submissions for unknown `test_id` are rejected)
 
 **Observations:** Test results, error messages, historical pass/fail data, source code, and git diffs.
 
-**Grading:** Per-test average of category (50%), evidence quality (30%), recommendation (20%).
+**Grading:** Per-test average of `category` enum (50%), `evidence_tags` F1 over the closed `EVIDENCE_TAGS` vocabulary (30%), `recommendation` enum (20%).
 
 ### Task 3: Multi-Service Outage RCA (Hard)
 
@@ -69,23 +69,77 @@ The agent investigates a cascading outage across a microservice architecture (14
 - `get_service_logs(service, level, limit)` — service logs
 - `get_service_config(service)` — configuration and versions
 - `get_dependency_graph()` — service dependency map
-- `trace_request(trace_id)` — distributed traces
-- `get_alert_history()` — alerts and available trace IDs
+- `trace_request(trace_id)` — distributed traces (trace IDs are embedded in alert messages; there is no dump tool)
+- `get_alert_history()` — recent alerts with trace IDs embedded in the message field
 - `get_deployment_history(service)` — recent deployments, optionally filtered by service
-- `submit_report(root_cause_service, root_cause_description, failure_chain, remediation_steps)` — submit report
+- `get_remediation_steps()` — canonical remediation step bank (list of `{id, label}`) for this scenario
+- `submit_report(root_cause_service, failure_chain, remediation_step_ids)` — structured report; agents pick step IDs from the canonical bank instead of writing prose
 
 **Observations:** Service statuses, metrics, logs, configs, dependency graph, distributed traces, and alerts.
 
-**Grading:** root_cause_service (25%), description (20%), failure_chain ordering (25%), remediation (20%), remediation ordering (10%).
+**Grading:** `root_cause_service` exact (30%), `failure_chain` precision-aware LCS (30%), `remediation_step_ids` F1 (25%) + ordering LCS (15%). LCS divides by `max(len(sub), len(exp))` so padding the chain hurts.
 
 ## Reward Function
 
-Each task provides **incremental rewards** during investigation:
-- Positive rewards for useful actions (querying relevant services, checking test history, tracing failures)
-- Penalties for repeated identical tool calls (-0.02) and excessive steps (-0.01/step past threshold)
-- Final grading score (0.0–1.0) added on submission
+Each task provides **incremental rewards** during investigation, plus a final grading score on submission.
 
-This provides meaningful feedback throughout the trajectory, not just at the end.
+- Positive shaping for useful first-time actions (querying relevant services, checking test history, tracing known request IDs).
+- Shaping is **capped at `MAX_SHAPING_REWARD = 0.15` per episode**. Once the shaping budget is exhausted, further exploration earns zero shaping. The cap is kept below the smallest non-zero submission component (severity = 0.20) so a pure-exploration agent can never beat even a minimal successful submission.
+- Repeat-action penalty: `-0.05` per repeated action. The action key is hashed over semantically meaningful args only (e.g. `service` for `get_logs`), so bumping `limit=1 → limit=2` does not evade the penalty.
+- Step penalty after a per-task threshold: `-0.03` per step. Over the horizon this strictly dominates the shaping cap, so "wander forever" is worse than "submit something".
+- The final grading score (0.0–1.0) is added on submission via one of `submit_diagnosis`, `submit_classification`, or `submit_report`. Termination via max-step cutoff does not count as a submission; `inference.py` credits `score = 0` for episodes that never submit.
+
+## Grading & determinism
+
+All grading is **deterministic and structured-only**. Free-text fields were removed in favor of closed vocabularies because keyword-coverage scoring was trivially gamed by stuffing every plausible term into a blob.
+
+Closed vocabularies live in `server/rewards.py`:
+- `INCIDENT_TYPES` (10) + `INCIDENT_TYPE_ALIASES` for Task 1
+- `SEVERITIES` (P1–P4) for Task 1
+- `ROOT_CAUSE_TAGS` (~37 tags across 10 incident families) for Task 1
+- `CATEGORIES` (`genuine_bug`, `flaky_test`, `environment_issue`, `stale_test`) for Task 2
+- `RECOMMENDATIONS` (`fix_code`, `rerun`, `update_test`, `check_infra`) for Task 2
+- `EVIDENCE_TAGS` (~28 tags) for Task 2
+- A per-scenario remediation step bank (`remediation_steps_canonical`) for Task 3 — submissions pick step IDs from this list
+
+Set components are F1-scored so over-submitting hurts as much as under-submitting. Ordered components use precision-aware LCS (`lcs / max(len(sub), len(exp))`) so padding the chain hurts.
+
+### Train/test split
+
+Each scenario is tagged with `split: "train" | "test"`. `reset(seed=..., split="test")` filters to the held-out pool and picks a scenario from a local `random.Random(seed)` — it never touches the global RNG, so fixed-seed runs are byte-reproducible. The default split is `"train"`.
+
+Split sizes (7 train / 3 test per task, 21 train / 9 test total):
+- Task 1 test pool: `upstream_api_timeout`, `database_deadlock`, `cache_poisoning`
+- Task 2 test pool: `project_tracker`, `search_engine`, `authentication_flow`
+- Task 3 test pool: `cache_thundering_herd`, `dns_outage`, `queue_backlog`
+
+### Reproducing a baseline
+
+```bash
+uv run uvicorn server.app:app --port 8000 &
+ENV_BASE_URL=http://localhost:8000 HF_TOKEN=$HF_TOKEN uv run python inference.py
+```
+
+`inference.py` runs all three tasks against the test split (via `reset(split="test")` in a future change, or by omitting split for now). Scores are reproducible across runs at a fixed model + seed. Run twice and diff the `[END]` lines — they should match exactly.
+
+## Anti-gaming
+
+The env was hardened against 26 exploits identified during a pre-submission audit. The fixes are pinned by adversarial tests in [`tests/test_exploits.py`](tests/test_exploits.py):
+
+- **Keyword stuffing** — F1 scoring + closed vocabularies. Pinned by `test_keyword_stuffing_*` and `test_kitchen_sink_services_component_capped`.
+- **Answer-key oracles** — `get_runbook` no longer enumerates incident types; `search_logs("")` is rejected; `get_service_metrics` no longer falls back to healthy metrics for unknown services; `get_alert_history` no longer dumps trace IDs; `get_logs(limit=…)` is clamped to 50. Pinned by `test_get_runbook_does_not_leak_vocab`, `test_search_logs_rejects_empty_keyword`, `test_get_logs_clamps_limit`, `test_get_service_metrics_no_healthy_fallback`.
+- **Scenario-ID leakage** — `reset()` no longer echoes `scenario_id` in observation metadata. Pinned by `test_scenario_id_not_in_reset_metadata`.
+- **Args-noise repeat-penalty evasion** — the repeat key hashes only semantically meaningful args. Pinned by `test_args_noise_does_not_farm_shaping`.
+- **Shaping-reward farming** — per-episode cap enforced in `_credit_shaping`. Pinned by `test_shaping_cap_enforced` and `test_shaping_cap_below_minimum_submission`.
+- **"Never submit" loophole** — `inference.py` credits `score = 0` when no `submit_*` tool was called, and terminal max-step cutoffs are not miscounted as submissions. Pinned by `test_step_penalty_dwarfs_shaping_cap`.
+- **Seed-dependent scenario selection** — local `Random(seed)`, never the global module RNG. Pinned by `test_seed_determinism_same_scenario`, `test_different_seeds_can_differ`, `test_train_test_split_disjoint`.
+- **Cross-task submission leakage** — `submit_*` tools refuse to score when the active task is different. Pinned by `test_submit_tool_rejects_wrong_task`.
+
+Run the suite with:
+
+```bash
+uv run python -m pytest tests/ -q
+```
 
 ## Setup
 
@@ -125,7 +179,16 @@ python inference.py
 | `test_triage` | ~0.40–0.60 |
 | `outage_rca` | ~0.30–0.50 |
 
-Scores vary by model. Larger models with strong reasoning capabilities perform better on the harder tasks.
+Scores vary by model. Larger models with strong reasoning capabilities perform better on the harder tasks. These baselines were measured against the structured-submission grader described in the **Grading & determinism** section, not the earlier keyword-coverage grader.
+
+## Future work
+
+These are intentional non-goals for the hackathon submission and are documented for posterity:
+
+- **Parametric scenario generator.** A seeded generator for Task 1/2 would make the train split essentially unbounded, which matters more for RL fine-tuning than for hackathon eval.
+- **LLM-judge grading for prose remediation.** Dropped because keyword coverage was gameable and structured IDs are verifiable. Could be re-added if the vocabulary feels too restrictive.
+- **Three-way train/val/test split.** Currently two-way; adding a val split matters for hyperparameter tuning loops.
+- **Hermetic eval-mode flag** that disables shaping entirely so pure-eval scores equal pure submission reward.
 
 ## Output Format
 

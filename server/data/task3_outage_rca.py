@@ -1129,3 +1129,82 @@ SCENARIOS = [
         ],
     },
 ]
+
+
+# ── Closed-vocabulary overlay ──
+# Each scenario gets `remediation_steps_canonical`: a per-scenario step bank
+# with stable IDs. The agent submits an ordered list of step IDs, scored by
+# F1 (set component) + precision-aware LCS (order component). No prose grading.
+
+_REMEDIATION_BY_ID: dict[str, list[dict[str, str]]] = {
+    "db_connection_limit": [
+        {"id": "increase_max_connections_user_db", "label": "Increase max_connections on user-db from 100 to 500"},
+        {"id": "restart_user_service", "label": "Restart user-service to clear stale connection pool"},
+        {"id": "monitor_auth_service_recovery", "label": "Monitor auth-service recovery and cache hit rate"},
+        {"id": "add_pgbouncer", "label": "Add PgBouncer connection pooling for long-term fix"},
+    ],
+    "bad_deploy": [
+        {"id": "rollback_payment_service_v230", "label": "Rollback payment-service from v2.4.0 to v2.3.0"},
+        {"id": "drain_replay_queue", "label": "Drain and replay failed messages from the queue"},
+        {"id": "verify_worker_processing", "label": "Verify worker processing resumes after rollback"},
+        {"id": "add_serialization_integration_tests", "label": "Add integration tests for payment API serialization format"},
+    ],
+    "cert_expiry_cascade": [
+        {"id": "renew_tls_cert_cache", "label": "Renew TLS certificate on cache (Redis) server"},
+        {"id": "restart_auth_service", "label": "Restart auth-service to re-establish TLS connections"},
+        {"id": "clear_session_data", "label": "Clear stale session data and verify auth flow"},
+        {"id": "setup_cert_expiry_monitoring", "label": "Set up certificate expiry monitoring with 30-day alert"},
+    ],
+    "search_index_corruption": [
+        {"id": "delete_corrupted_index_reindex", "label": "Delete corrupted search index and trigger full reindex"},
+        {"id": "increase_disk_search_service", "label": "Increase disk allocation on search-service nodes"},
+        {"id": "monitor_product_service_fallback", "label": "Monitor product-service fallback to direct DB queries"},
+        {"id": "add_preflight_disk_check", "label": "Add pre-flight disk space check before reindex jobs"},
+    ],
+    "notification_email_storm": [
+        {"id": "stop_worker_drain_poisoned_messages", "label": "Stop the worker and drain the poisoned messages"},
+        {"id": "fix_retry_logic_max_retries_3", "label": "Fix the retry logic to use max_retries=3 with backoff"},
+        {"id": "restart_notification_clear_email_block", "label": "Restart notification-service and clear the email rate limit block"},
+        {"id": "add_dead_letter_queue_circuit_breaker", "label": "Add dead letter queue handling and circuit breaker"},
+    ],
+    "cache_thundering_herd": [
+        {"id": "cache_warming_prepopulate", "label": "Implement cache warming script to pre-populate hot keys"},
+        {"id": "request_coalescing_auth_service", "label": "Add request coalescing in auth-service"},
+        {"id": "increase_user_db_max_connections_temp", "label": "Increase user-db max_connections temporarily"},
+        {"id": "configure_cache_persistence", "label": "Configure cache with RDB/AOF persistence"},
+    ],
+    "memory_pressure_cascade": [
+        {"id": "restart_worker_oom", "label": "Restart worker service to recover from OOM state"},
+        {"id": "fix_batch_report_memory_leak", "label": "Fix memory leak in batch report processing code"},
+        {"id": "drain_queue_backlog", "label": "Drain backed-up queue messages"},
+        {"id": "monitor_notification_recovery", "label": "Monitor notification-service recovery"},
+    ],
+    "dns_outage": [
+        {"id": "restart_cache_redis", "label": "Restart cache (Redis) and verify network connectivity"},
+        {"id": "reconnect_auth_user_to_cache", "label": "Reconnect auth-service and user-service to cache"},
+        {"id": "monitor_db_load_during_recovery", "label": "Monitor database load during cache recovery"},
+        {"id": "add_circuit_breaker_cache", "label": "Add circuit breaker for cache connections"},
+    ],
+    "config_change_rollout": [
+        {"id": "rollback_product_service_config", "label": "Rollback product-service config to previous version"},
+        {"id": "fix_db_connection_string", "label": "Fix connection string to point to correct database cluster"},
+        {"id": "verify_search_service_recovery", "label": "Verify search-service recovery and index consistency"},
+        {"id": "add_config_validation_pipeline", "label": "Add config validation to deployment pipeline"},
+    ],
+    "queue_backlog": [
+        {"id": "increase_queue_storage", "label": "Increase queue storage / clear disk space on queue broker"},
+        {"id": "purge_dead_letter_messages", "label": "Purge dead-letter queue messages"},
+        {"id": "restart_worker_consumers", "label": "Restart worker consumers and re-enable auto-commit"},
+        {"id": "add_queue_depth_monitoring", "label": "Add queue depth monitoring and disk space alerts"},
+    ],
+}
+
+_TEST_SCENARIO_IDS: set[str] = {"cache_thundering_herd", "dns_outage", "queue_backlog"}
+
+_PUBLIC_DESCRIPTION = "Investigate the multi-service outage, identify the root cause, and submit a remediation plan."
+
+for _s in SCENARIOS:
+    _s["split"] = "test" if _s["id"] in _TEST_SCENARIO_IDS else "train"
+    _s["remediation_steps_canonical"] = _REMEDIATION_BY_ID[_s["id"]]
+    _s["internal_description"] = _s["description"]
+    _s["description"] = _PUBLIC_DESCRIPTION
