@@ -24,3 +24,13 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["server", "server.data"]
+
+[tool.pytest.ini_options]
+# `importlib` mode stops pytest from walking up from tests/__init__.py to the
+# repo root and treating the project as a package named `openenv` — which
+# would shadow the installed `openenv-core` package. The empty __init__.py at
+# the repo root is intentional for the hackathon submission layout, so we
+# reach around it here instead of deleting it.
+addopts = "--import-mode=importlib"
+pythonpath = ["."]
+testpaths = ["tests"]

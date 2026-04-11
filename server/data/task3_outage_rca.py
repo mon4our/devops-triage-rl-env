@@ -1,5 +1,7 @@
 """Synthetic outage scenarios for Task 3: Multi-Service Outage Root Cause Analysis."""
 
+import random as _random
+
 
 def _ts(minute, second=0):
     return f"2026-04-04T14:{minute:02d}:{second:02d}Z"
@@ -63,13 +65,13 @@ SCENARIOS = [
             "user-service": "unhealthy",
             "user-db": "unhealthy",
             "product-service": "healthy",
-            "product-db": "healthy",
+            "product-db": "degraded",
             "search-service": "healthy",
             "payment-service": "healthy",
             "payment-gateway": "healthy",
             "queue": "healthy",
             "worker": "healthy",
-            "notification-service": "healthy",
+            "notification-service": "unhealthy",
             "cache": "healthy",
             "email-provider": "healthy",
         },
@@ -181,13 +183,13 @@ SCENARIOS = [
             "user-db": "healthy",
             "product-service": "healthy",
             "product-db": "healthy",
-            "search-service": "healthy",
+            "search-service": "unhealthy",
             "payment-service": "unhealthy",
             "payment-gateway": "healthy",
             "queue": "degraded",
             "worker": "unhealthy",
             "notification-service": "healthy",
-            "cache": "healthy",
+            "cache": "degraded",
             "email-provider": "healthy",
         },
         "service_metrics": {
@@ -291,12 +293,12 @@ SCENARIOS = [
             "user-service": "healthy",
             "user-db": "healthy",
             "product-service": "healthy",
-            "product-db": "healthy",
+            "product-db": "degraded",
             "search-service": "healthy",
             "payment-service": "healthy",
             "payment-gateway": "healthy",
             "queue": "healthy",
-            "worker": "healthy",
+            "worker": "unhealthy",
             "notification-service": "healthy",
             "cache": "unhealthy",
             "email-provider": "healthy",
@@ -403,9 +405,9 @@ SCENARIOS = [
             "payment-service": "healthy",
             "payment-gateway": "healthy",
             "queue": "healthy",
-            "worker": "healthy",
+            "worker": "unhealthy",
             "notification-service": "healthy",
-            "cache": "healthy",
+            "cache": "degraded",
             "email-provider": "healthy",
         },
         "service_metrics": {
@@ -504,13 +506,13 @@ SCENARIOS = [
             "user-db": "healthy",
             "product-service": "healthy",
             "product-db": "healthy",
-            "search-service": "healthy",
+            "search-service": "unhealthy",
             "payment-service": "healthy",
             "payment-gateway": "healthy",
             "queue": "degraded",
             "worker": "unhealthy",
             "notification-service": "unhealthy",
-            "cache": "healthy",
+            "cache": "degraded",
             "email-provider": "degraded",
         },
         "service_metrics": {
@@ -616,12 +618,12 @@ SCENARIOS = [
             "user-service": "unhealthy",
             "user-db": "unhealthy",
             "product-service": "healthy",
-            "product-db": "healthy",
+            "product-db": "degraded",
             "search-service": "healthy",
             "payment-service": "healthy",
             "payment-gateway": "healthy",
             "queue": "healthy",
-            "worker": "healthy",
+            "worker": "unhealthy",
             "notification-service": "healthy",
             "cache": "degraded",
             "email-provider": "healthy",
@@ -745,8 +747,8 @@ SCENARIOS = [
             "user-service": "healthy",
             "user-db": "healthy",
             "product-service": "healthy",
-            "product-db": "healthy",
-            "search-service": "healthy",
+            "product-db": "degraded",
+            "search-service": "unhealthy",
             "payment-service": "healthy",
             "payment-gateway": "healthy",
             "queue": "unhealthy",
@@ -846,12 +848,12 @@ SCENARIOS = [
             "user-service": "degraded",
             "user-db": "healthy",
             "product-service": "healthy",
-            "product-db": "healthy",
+            "product-db": "degraded",
             "search-service": "healthy",
             "payment-service": "healthy",
             "payment-gateway": "healthy",
             "queue": "healthy",
-            "worker": "healthy",
+            "worker": "unhealthy",
             "notification-service": "healthy",
             "cache": "unhealthy",
             "email-provider": "healthy",
@@ -953,9 +955,9 @@ SCENARIOS = [
             "payment-service": "healthy",
             "payment-gateway": "healthy",
             "queue": "healthy",
-            "worker": "healthy",
+            "worker": "unhealthy",
             "notification-service": "healthy",
-            "cache": "healthy",
+            "cache": "degraded",
             "email-provider": "healthy",
         },
         "service_metrics": {
@@ -1044,13 +1046,13 @@ SCENARIOS = [
             "user-db": "healthy",
             "product-service": "healthy",
             "product-db": "healthy",
-            "search-service": "healthy",
+            "search-service": "unhealthy",
             "payment-service": "degraded",
             "payment-gateway": "healthy",
             "queue": "unhealthy",
             "worker": "unhealthy",
             "notification-service": "degraded",
-            "cache": "healthy",
+            "cache": "degraded",
             "email-provider": "healthy",
         },
         "service_metrics": {
@@ -1199,6 +1201,89 @@ _REMEDIATION_BY_ID: dict[str, list[dict[str, str]]] = {
     ],
 }
 
+# Distractor remediation steps per scenario. Shape matches canonical — each
+# entry is {"id", "label"}. Distractors are plausible SRE actions that would
+# be wrong FOR THIS SPECIFIC incident (e.g. `rollback_last_deploy` is only a
+# distractor for scenarios NOT caused by a deploy). They are merged with the
+# canonical steps into `remediation_steps_bank` and returned by the
+# `get_remediation_steps` tool — the grader continues to use only
+# `remediation_steps_canonical`, so blind-copying the bank tanks F1 precision
+# and the ordering LCS.
+_DISTRACTORS_BY_ID: dict[str, list[dict[str, str]]] = {
+    "db_connection_limit": [
+        {"id": "rollback_last_deploy", "label": "Rollback the last deployment across all services"},
+        {"id": "scale_user_service_replicas_10x", "label": "Scale user-service replicas from 3 to 30 to absorb traffic"},
+        {"id": "clear_cdn_cache", "label": "Clear the CDN edge cache to force fresh fetches"},
+        {"id": "force_restart_auth_service", "label": "Force-restart auth-service to drop stuck sessions"},
+    ],
+    "bad_deploy": [
+        {"id": "increase_user_db_max_connections", "label": "Increase user-db max_connections from 100 to 500"},
+        {"id": "clear_redis_cache", "label": "Clear Redis cache to invalidate stale entries"},
+        {"id": "purge_worker_queue", "label": "Purge all pending messages from the worker queue"},
+        {"id": "enable_read_only_mode", "label": "Put the application into read-only mode while investigating"},
+    ],
+    "cert_expiry_cascade": [
+        {"id": "rollback_auth_service_deploy", "label": "Rollback auth-service to the previous version"},
+        {"id": "failover_to_secondary_cache", "label": "Fail over to a secondary cache cluster"},
+        {"id": "increase_auth_timeout", "label": "Increase auth-service upstream timeout from 5s to 30s"},
+        {"id": "restart_user_db", "label": "Restart user-db to clear locked sessions"},
+    ],
+    "search_index_corruption": [
+        {"id": "rollback_search_service_deploy", "label": "Rollback search-service to the previous version"},
+        {"id": "scale_product_service_replicas", "label": "Scale product-service replicas from 3 to 20"},
+        {"id": "clear_cdn_cache", "label": "Clear the CDN edge cache for product pages"},
+        {"id": "restart_api_gateway", "label": "Restart api-gateway to drop stuck upstreams"},
+    ],
+    "notification_email_storm": [
+        {"id": "rollback_notification_service_deploy", "label": "Rollback notification-service to the previous version"},
+        {"id": "increase_email_rate_limit", "label": "Ask email-provider to raise the outbound rate limit"},
+        {"id": "restart_api_gateway", "label": "Restart api-gateway to clear upstream backoff"},
+        {"id": "scale_notification_service_replicas", "label": "Scale notification-service replicas from 3 to 15"},
+    ],
+    "cache_thundering_herd": [
+        {"id": "rollback_cache_deploy", "label": "Rollback cache to the previous Redis build"},
+        {"id": "increase_user_db_replicas", "label": "Scale user-db read replicas from 1 to 5"},
+        {"id": "restart_api_gateway", "label": "Restart api-gateway to drop stuck connections"},
+        {"id": "clear_cdn_cache", "label": "Clear CDN edge cache to force refetch"},
+    ],
+    "memory_pressure_cascade": [
+        {"id": "rollback_worker_deploy", "label": "Rollback worker-service to the previous version"},
+        {"id": "clear_cdn_cache", "label": "Clear the CDN edge cache"},
+        {"id": "increase_queue_storage", "label": "Increase queue broker storage from 20GB to 100GB"},
+        {"id": "restart_api_gateway", "label": "Restart api-gateway to drop stuck upstreams"},
+    ],
+    "dns_outage": [
+        {"id": "rollback_cache_deploy", "label": "Rollback cache to the previous Redis build"},
+        {"id": "increase_cache_replicas", "label": "Scale cache to a 3-node Redis cluster"},
+        {"id": "clear_cdn_cache", "label": "Clear the CDN edge cache"},
+        {"id": "restart_api_gateway", "label": "Restart api-gateway to drop stuck upstreams"},
+    ],
+    "config_change_rollout": [
+        {"id": "scale_product_db_replicas", "label": "Scale product-db read replicas from 1 to 5"},
+        {"id": "clear_cdn_cache", "label": "Clear the CDN edge cache for product pages"},
+        {"id": "purge_worker_queue", "label": "Purge pending messages from the worker queue"},
+        {"id": "restart_api_gateway", "label": "Restart api-gateway to drop stuck upstreams"},
+    ],
+    "queue_backlog": [
+        {"id": "rollback_queue_deploy", "label": "Rollback queue broker to the previous RabbitMQ version"},
+        {"id": "scale_worker_replicas_10x", "label": "Scale worker replicas from 3 to 30 to drain faster"},
+        {"id": "clear_cdn_cache", "label": "Clear the CDN edge cache"},
+        {"id": "restart_api_gateway", "label": "Restart api-gateway to drop stuck upstreams"},
+    ],
+}
+
+
+def _build_bank(scenario_id: str, canonical: list, distractors: list) -> list:
+    """Merge canonical + distractor steps into a single bank, shuffled
+    deterministically per scenario so the order is reproducible across runs
+    but not trivially aligned with the canonical sequence.
+    """
+    combined = list(canonical) + list(distractors)
+    rng = _random.Random(f"bank::{scenario_id}")
+    rng.shuffle(combined)
+    return combined
+
+
 _TEST_SCENARIO_IDS: set[str] = {"cache_thundering_herd", "dns_outage", "queue_backlog"}
 
 _PUBLIC_DESCRIPTION = "Investigate the multi-service outage, identify the root cause, and submit a remediation plan."
@@ -1206,5 +1291,9 @@ _PUBLIC_DESCRIPTION = "Investigate the multi-service outage, identify the root c
 for _s in SCENARIOS:
     _s["split"] = "test" if _s["id"] in _TEST_SCENARIO_IDS else "train"
     _s["remediation_steps_canonical"] = _REMEDIATION_BY_ID[_s["id"]]
+    _s["remediation_steps_distractors"] = _DISTRACTORS_BY_ID[_s["id"]]
+    _s["remediation_steps_bank"] = _build_bank(
+        _s["id"], _REMEDIATION_BY_ID[_s["id"]], _DISTRACTORS_BY_ID[_s["id"]],
+    )
     _s["internal_description"] = _s["description"]
     _s["description"] = _PUBLIC_DESCRIPTION

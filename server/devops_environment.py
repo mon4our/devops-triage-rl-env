@@ -412,10 +412,21 @@ class DevOpsEnvironment(MCPEnvironment):
 
         @mcp.tool
         def get_remediation_steps() -> list[dict]:
-            """List the canonical remediation step bank for this scenario.
-            Each entry has an `id` and a human-readable `label`. Submit an
-            ordered list of step IDs via submit_report(remediation_step_ids=...).
+            """List the candidate remediation step bank for this scenario.
+
+            The bank contains BOTH applicable steps AND plausible distractors —
+            you must decide which IDs apply to the current incident. Submitting
+            the entire bank hurts your score: F1 is precision-aware and
+            ordering LCS divides by max length, so extras drag both components
+            down.
+
+            Each entry has an `id` and a human-readable `label`. Submit only
+            the applicable IDs, in operational order, via
+            submit_report(remediation_step_ids=...).
             """
+            bank = env._scenario.get("remediation_steps_bank")
+            if bank:
+                return bank
             return env._scenario.get("remediation_steps_canonical", [])
 
         @mcp.tool
