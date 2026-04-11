@@ -13,4 +13,6 @@ class DevOpsState(State):
 
     task: str = ""
     scenario_id: str = ""
+    split: str = "train"
+    step_count: int = 0
     accumulated_reward: float = 0.0

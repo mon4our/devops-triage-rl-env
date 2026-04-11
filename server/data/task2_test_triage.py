@@ -2397,3 +2397,23 @@ SCENARIOS = [
         },
     },
 ]
+
+
+# ── Closed-vocabulary overlay ──
+# Each failed test gets a structured `evidence_tags` list picked from
+# rewards.EVIDENCE_TAGS based on its category. The grader F1-scores the tag
+# set instead of grading prose evidence — that kills keyword stuffing.
+
+_CATEGORY_DEFAULT_TAGS: dict[str, list[str]] = {
+    "genuine_bug": ["recent_code_change", "regression"],
+    "flaky_test": ["intermittent", "timing_dependent", "passes_on_rerun"],
+    "environment_issue": ["external_service_down", "infrastructure_failure"],
+    "stale_test": ["outdated_assertion", "intentional_change"],
+}
+
+_TEST_SCENARIO_IDS: set[str] = {"project_tracker", "search_engine", "authentication_flow"}
+
+for _s in SCENARIOS:
+    _s["split"] = "test" if _s["id"] in _TEST_SCENARIO_IDS else "train"
+    for _t in _s.get("failed_tests", []):
+        _t["evidence_tags"] = list(_CATEGORY_DEFAULT_TAGS[_t["category"]])
