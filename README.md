@@ -124,7 +124,7 @@ ENV_BASE_URL=http://localhost:8000 HF_TOKEN=$HF_TOKEN uv run python inference.py
 
 ## Anti-gaming
 
-The env was hardened against 26 exploits identified during a pre-submission audit. The fixes are pinned by adversarial tests in [`tests/test_exploits.py`](tests/test_exploits.py):
+The env was hardened across **two audit passes** — the initial pre-submission audit and a Phase 3 oracle-hunt pass that killed two closed-form solutions on Task 3. Every fix is pinned by an adversarial test in [`tests/test_exploits.py`](tests/test_exploits.py) so a regression re-opens a known hole *loudly* in CI. Run the suite with `uv run python -m pytest tests/ -q` (takes ~2 seconds).
 
 - **Keyword stuffing** — F1 scoring + closed vocabularies. Pinned by `test_keyword_stuffing_*` and `test_kitchen_sink_services_component_capped`.
 - **Answer-key oracles** — `get_runbook` no longer enumerates incident types; `search_logs("")` is rejected; `get_service_metrics` no longer falls back to healthy metrics for unknown services; `get_alert_history` no longer dumps trace IDs; `get_logs(limit=…)` is clamped to 50. Pinned by `test_get_runbook_does_not_leak_vocab`, `test_search_logs_rejects_empty_keyword`, `test_get_logs_clamps_limit`, `test_get_service_metrics_no_healthy_fallback`.
@@ -134,12 +134,8 @@ The env was hardened against 26 exploits identified during a pre-submission audi
 - **"Never submit" loophole** — `inference.py` credits `score = 0` when no `submit_*` tool was called, and terminal max-step cutoffs are not miscounted as submissions. Pinned by `test_step_penalty_dwarfs_shaping_cap`.
 - **Seed-dependent scenario selection** — local `Random(seed)`, never the global module RNG. Pinned by `test_seed_determinism_same_scenario`, `test_different_seeds_can_differ`, `test_train_test_split_disjoint`.
 - **Cross-task submission leakage** — `submit_*` tools refuse to score when the active task is different. Pinned by `test_submit_tool_rejects_wrong_task`.
-
-Run the suite with:
-
-```bash
-uv run python -m pytest tests/ -q
-```
+- **Remediation-bank oracle** — `get_remediation_steps()` now returns the canonical steps *plus plausible distractors*, shuffled deterministically per scenario. Blind-copying the bank drops the remediation component of the Task 3 score materially because F1 is precision-aware and the ordering LCS divides by max length. Pinned by `test_remediation_bank_superset_of_canonical` and `test_blind_bank_copy_is_bounded`.
+- **Dependency-walk service-status oracle** — `service_statuses` now always contains red-herring non-healthy services that are *not* part of the real failure chain, so "walk the dep graph from the upstream-most unhealthy service" is no longer a closed-form solution. A real investigative policy can still rule out the red herrings via metrics/logs/traces. Pinned by `test_service_status_has_red_herring` and `test_naive_dep_walk_oracle_is_bounded`.
 
 ## Setup
 
