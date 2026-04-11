@@ -19,6 +19,16 @@ from __future__ import annotations
 from typing import Iterable
 
 
+# Score epsilon: keeps final grades strictly inside (0, 1) as required by the
+# submission validator. 1e-4 matches the 4-decimal rounding used below.
+_SCORE_EPS = 1e-4
+
+
+def _clamp_score(score: float) -> float:
+    """Clamp to the open interval (0, 1) with 4-decimal precision."""
+    return round(min(max(score, _SCORE_EPS), 1.0 - _SCORE_EPS), 4)
+
+
 # ── Shared helpers ──
 
 def _normalize(s: str) -> str:
@@ -212,7 +222,7 @@ def grade_log_diagnosis(submitted: dict, ground_truth: dict) -> float:
     exp_tags = _normalize_set(ground_truth["root_cause_tags"])
     score += 0.20 * _f1(sub_tags, exp_tags)
 
-    return round(min(score, 1.0), 4)
+    return _clamp_score(score)
 
 
 # ── Task 2: CI/CD Test Failure Triage ──
@@ -233,7 +243,7 @@ def grade_test_classification(submitted: dict, ground_truth: dict) -> float:
     if _normalize(submitted.get("recommendation", "")) == _normalize(ground_truth["recommendation"]):
         score += 0.20
 
-    return round(min(score, 1.0), 4)
+    return round(min(max(score, 0.0), 1.0), 4)
 
 
 def grade_test_triage(
@@ -241,13 +251,13 @@ def grade_test_triage(
     failed_tests: list[dict],
 ) -> float:
     if not failed_tests:
-        return 0.0
+        return _SCORE_EPS
     total = 0.0
     for test in failed_tests:
         test_id = test["test_id"]
         if test_id in classifications:
             total += grade_test_classification(classifications[test_id], test)
-    return round(total / len(failed_tests), 4)
+    return _clamp_score(total / len(failed_tests))
 
 
 # ── Task 3: Multi-Service Outage RCA ──
@@ -274,4 +284,4 @@ def grade_outage_rca(submitted: dict, ground_truth: dict) -> float:
     score += 0.25 * _f1(_normalize_set(sub_steps), _normalize_set(exp_steps))
     score += 0.15 * _ordered_lcs_score(sub_steps, exp_steps)
 
-    return round(min(score, 1.0), 4)
+    return _clamp_score(score)
